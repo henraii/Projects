@@ -1,26 +1,23 @@
 {
-  "name": "webproject",
+  "name": "socialblog-backend",
+  "version": "1.0.0",
   "type": "module",
-  "version": "0.0.1",
+  "description": "Social blogging platform backend",
+  "main": "server.js",
   "scripts": {
-    "dev": "astro dev",
-    "build": "astro build",
-    "preview": "astro preview",
-    "astro": "astro"
+    "start": "node server.js",
+    "dev": "nodemon server.js"
   },
   "dependencies": {
-    "@astrojs/tailwind": "^6.0.2",
-    "@supabase/supabase-js": "^2.75.1",
-    "@tailwindcss/vite": "^4.1.14",
-    "astro": "^5.14.6",
-    "bcrypt": "^6.0.0",
-    "bcryptjs": "^3.0.2",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
-    "mongodb": "^6.20.0"
+    "mongodb": "^6.3.0",
+    "socket.io": "^4.8.1"
   },
   "devDependencies": {
-    "@astrojs/node": "^9.5.0",
-    "@types/jsonwebtoken": "^9.0.10",
-    "tailwindcss": "^4.1.14"
+    "nodemon": "^3.1.10"
   }
 }

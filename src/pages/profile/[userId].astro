@@ -1,0 +1,155 @@
+---
+// src/pages/profile/[userId].astro
+import Layout from '../../layouts/Layout.astro';
+---
+<Layout title="Profile">
+  <div class="max-w-5xl mx-auto">
+    <!-- Profile Header -->
+    <div class="bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg shadow-lg overflow-hidden mb-6">
+      <div class="h-32"></div>
+      <div class="bg-white px-6 pb-6">
+        <div class="flex items-end -mt-16 mb-4">
+          <img id="profile-avatar" class="w-32 h-32 rounded-full border-4 border-white shadow-lg" />
+          <div class="ml-4 flex-1">
+            <h1 id="profile-name" class="text-3xl font-bold"></h1>
+            <p id="profile-username" class="text-gray-600"></p>
+          </div>
+          <div class="space-x-3">
+            <button id="message-btn" class="hidden bg-blue-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-blue-700 transition">
+              Message
+            </button>
+            <button id="follow-btn" class="hidden bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-2 rounded-lg font-semibold hover:from-blue-700 hover:to-purple-700 transition">
+              Follow
+            </button>
+            <button id="unfollow-btn" class="hidden bg-gray-200 text-gray-700 px-6 py-2 rounded-lg font-semibold hover:bg-gray-300 transition">
+              Unfollow
+            </button>
+          </div>
+        </div>
+        <p id="profile-bio" class="text-gray-700 mb-4"></p>
+        <div class="flex space-x-8">
+          <div>
+            <span id="posts-count" class="font-bold text-xl">0</span>
+            <span class="text-gray-600"> Posts</span>
+          </div>
+          <div>
+            <span id="followers-count" class="font-bold text-xl">0</span>
+            <span class="text-gray-600"> Followers</span>
+          </div>
+          <div>
+            <span id="following-count" class="font-bold text-xl">0</span>
+            <span class="text-gray-600"> Following</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- User Posts -->
+    <div class="bg-white rounded-lg shadow-md p-6">
+      <h2 class="text-2xl font-bold mb-6">Posts</h2>
+      <div id="user-posts" class="space-y-6">
+        <div class="text-center py-8 text-gray-500">
+          Loading posts...
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_URL = 'http://localhost:3001/api';
+    const token = localStorage.getItem('token');
+
+    if (!token) {
+      window.location.href = '/login';
+    }
+
+    const userId = window.location.pathname.split('/').pop();
+    let currentUser;
+    let profileUser;
+
+    // Load current user
+    async function loadCurrentUser() {
+      const res = await fetch(`${API_URL}/users/me`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      currentUser = await res.json();
+    }
+
+    // Load profile
+    async function loadProfile() {
+      const res = await fetch(`${API_URL}/users/${userId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      profileUser = await res.json();
+
+      // Update UI
+      document.getElementById('profile-avatar').src = profileUser.avatar;
+      document.getElementById('profile-name').textContent = profileUser.displayName;
+      document.getElementById('profile-username').textContent = '@' + profileUser.username;
+      document.getElementById('profile-bio').textContent = profileUser.bio || 'No bio yet';
+      document.getElementById('posts-count').textContent = profileUser.posts?.length || 0;
+      document.getElementById('followers-count').textContent = profileUser.followers?.length || 0;
+      document.getElementById('following-count').textContent = profileUser.following?.length || 0;
+
+      // Show/hide buttons
+      if (currentUser._id !== userId) {
+        document.getElementById('message-btn').classList.remove('hidden');
+        
+        const isFollowing = currentUser.following?.includes(userId);
+        if (isFollowing) {
+          document.getElementById('unfollow-btn').classList.remove('hidden');
+        } else {
+          document.getElementById('follow-btn').classList.remove('hidden');
+        }
+      }
+
+      // Load posts
+      const postsContainer = document.getElementById('user-posts');
+      if (profileUser.posts?.length) {
+        postsContainer.innerHTML = profileUser.posts.map(post => `
+          <div class="border-b border-gray-200 pb-6">
+            <h3 class="text-xl font-bold mb-2">${post.title}</h3>
+            <p class="text-gray-700 mb-3">${post.content}</p>
+            ${post.tags?.length ? `
+              <div class="flex flex-wrap gap-2 mb-3">
+                ${post.tags.map(tag => `<span class="bg-blue-100 text-blue-600 px-3 py-1 rounded-full text-sm">${tag}</span>`).join('')}
+              </div>
+            ` : ''}
+            <div class="flex items-center space-x-6 text-sm text-gray-500">
+              <span>${post.likes?.length || 0} likes</span>
+              <span>${post.comments?.length || 0} comments</span>
+              <span>${new Date(post.createdAt).toLocaleDateString()}</span>
+            </div>
+          </div>
+        `).join('');
+      } else {
+        postsContainer.innerHTML = '<p class="text-center text-gray-500">No posts yet</p>';
+      }
+    }
+
+    // Follow/Unfollow
+    document.getElementById('follow-btn').addEventListener('click', async () => {
+      await fetch(`${API_URL}/users/${userId}/follow`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      location.reload();
+    });
+
+    document.getElementById('unfollow-btn').addEventListener('click', async () => {
+      await fetch(`${API_URL}/users/${userId}/follow`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      location.reload();
+    });
+
+    // Message button
+    document.getElementById('message-btn').addEventListener('click', () => {
+      window.location.href = `/chat?user=${userId}`;
+    });
+
+    // Initialize
+    loadCurrentUser().then(loadProfile);
+  </script>
+</Layout>

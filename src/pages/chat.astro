@@ -1,0 +1,231 @@
+    ---
+// src/pages/chat.astro
+import Layout from '../layouts/Layout.astro';
+---
+<Layout title="Messages">
+  <div class="max-w-7xl mx-auto h-[calc(100vh-12rem)]">
+    <div class="bg-white rounded-lg shadow-md h-full flex">
+      <!-- Chat List -->
+      <div class="w-1/3 border-r border-gray-200">
+        <div class="p-4 border-b border-gray-200">
+          <h2 class="text-xl font-bold">Messages</h2>
+          <input
+            type="text"
+            id="chat-search"
+            placeholder="Search conversations..."
+            class="w-full mt-3 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
+          />
+        </div>
+        <div id="chat-list" class="overflow-y-auto h-[calc(100%-7rem)]">
+          <div class="p-4 text-center text-gray-500">
+            Loading conversations...
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat Window -->
+      <div class="flex-1 flex flex-col">
+        <div id="no-chat-selected" class="flex-1 flex items-center justify-center text-gray-500">
+          <div class="text-center">
+            <svg class="w-24 h-24 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+            </svg>
+            <p class="text-lg">Select a conversation to start messaging</p>
+          </div>
+        </div>
+
+        <div id="chat-window" class="flex-1 flex-col hidden">
+          <!-- Chat Header -->
+          <div id="chat-header" class="p-4 border-b border-gray-200 flex items-center space-x-3">
+            <img id="chat-avatar" class="w-10 h-10 rounded-full" />
+            <div>
+              <h3 id="chat-name" class="font-semibold"></h3>
+              <p id="chat-username" class="text-sm text-gray-500"></p>
+            </div>
+          </div>
+
+          <!-- Messages -->
+          <div id="messages-container" class="flex-1 overflow-y-auto p-4 space-y-3">
+          </div>
+
+          <!-- Message Input -->
+          <form id="message-form" class="p-4 border-t border-gray-200">
+            <div class="flex space-x-3">
+              <input
+                type="text"
+                id="message-input"
+                placeholder="Type a message..."
+                class="flex-1 px-4 py-2 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-600"
+                required
+              />
+              <button type="submit" class="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-2 rounded-full font-semibold hover:from-blue-700 hover:to-purple-700 transition">
+                Send
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <script>
+    const API_URL = 'http://localhost:3001/api';
+    const SOCKET_URL = 'http://localhost:3001';
+    const token = localStorage.getItem('token');
+
+    if (!token) {
+      window.location.href = '/login';
+    }
+
+    let socket;
+    let currentUser;
+    let currentChatId;
+    let currentRecipient;
+
+    // Initialize Socket.IO
+    function initSocket() {
+      socket = io(SOCKET_URL, {
+        auth: { token }
+      });
+
+      socket.on('connect', () => {
+        console.log('Connected to chat server');
+      });
+
+      socket.on('new-message', ({ chatId, message }) => {
+        if (chatId === currentChatId) {
+          addMessageToUI(message);
+        }
+        loadChats(); // Refresh chat list
+      });
+    }
+
+    // Load current user
+    async function loadCurrentUser() {
+      const res = await fetch(`${API_URL}/users/me`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      currentUser = await res.json();
+    }
+
+    // Load chats
+    async function loadChats() {
+      const res = await fetch(`${API_URL}/chats`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const chats = await res.json();
+
+      const chatList = document.getElementById('chat-list');
+      chatList.innerHTML = chats.length ? chats.map(chat => {
+        const otherUserId = chat.participants.find(p => p !== currentUser._id);
+        return `
+          <div onclick="openChat('${chat._id}', '${otherUserId}')" class="p-4 hover:bg-gray-50 cursor-pointer border-b border-gray-100">
+            <div class="flex items-center space-x-3">
+              <div class="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center text-white font-semibold">
+                U
+              </div>
+              <div class="flex-1">
+                <p class="font-semibold">User ${otherUserId.substring(0, 8)}</p>
+                <p class="text-sm text-gray-500">${chat.messages[chat.messages.length - 1]?.content || 'Start conversation'}</p>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('') : '<p class="p-4 text-center text-gray-500">No conversations yet</p>';
+    }
+
+    // Open chat
+    window.openChat = async (chatId, recipientId) => {
+      currentChatId = chatId;
+
+      // Load recipient info
+      const res = await fetch(`${API_URL}/users/${recipientId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      currentRecipient = await res.json();
+
+      // Update UI
+      document.getElementById('no-chat-selected').classList.add('hidden');
+      document.getElementById('chat-window').classList.remove('hidden');
+      document.getElementById('chat-window').classList.add('flex');
+      
+      document.getElementById('chat-avatar').src = currentRecipient.avatar;
+      document.getElementById('chat-name').textContent = currentRecipient.displayName;
+      document.getElementById('chat-username').textContent = '@' + currentRecipient.username;
+
+      // Join socket room
+      socket.emit('join-chat', chatId);
+
+      // Load messages
+      const messagesRes = await fetch(`${API_URL}/chats/${chatId}/messages`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const messages = await messagesRes.json();
+
+      const container = document.getElementById('messages-container');
+      container.innerHTML = '';
+      messages.forEach(addMessageToUI);
+      container.scrollTop = container.scrollHeight;
+    };
+
+    // Add message to UI
+    function addMessageToUI(message) {
+      const container = document.getElementById('messages-container');
+      const isOwn = message.userId === currentUser._id;
+      
+      const messageEl = document.createElement('div');
+      messageEl.className = `flex ${isOwn ? 'justify-end' : 'justify-start'}`;
+      messageEl.innerHTML = `
+        <div class="max-w-xs lg:max-w-md">
+          <div class="${isOwn ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-800'} rounded-2xl px-4 py-2">
+            <p>${message.content}</p>
+          </div>
+          <p class="text-xs text-gray-500 mt-1 ${isOwn ? 'text-right' : 'text-left'}">
+            ${new Date(message.createdAt).toLocaleTimeString()}
+          </p>
+        </div>
+      `;
+      
+      container.appendChild(messageEl);
+      container.scrollTop = container.scrollHeight;
+    }
+
+    // Send message
+    document.getElementById('message-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const input = document.getElementById('message-input');
+      const content = input.value.trim();
+
+      if (content && currentChatId) {
+        socket.emit('send-message', {
+          chatId: currentChatId,
+          content
+        });
+        input.value = '';
+      }
+    });
+
+    // Start new chat from URL parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const recipientId = urlParams.get('user');
+
+    if (recipientId) {
+      fetch(`${API_URL}/chats`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ recipientId })
+      }).then(res => res.json())
+        .then(chat => {
+          openChat(chat._id, recipientId);
+        });
+    }
+
+    // Initialize
+    initSocket();
+    loadCurrentUser().then(loadChats);
+  </script>
+</Layout>
