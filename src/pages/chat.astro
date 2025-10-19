@@ -70,6 +70,7 @@ import Layout from '../layouts/Layout.astro';
 
   <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
   <script>
+     // @ts-nocheck
     const API_URL = 'http://localhost:3001/api';
     const SOCKET_URL = 'http://localhost:3001';
     const token = localStorage.getItem('token');
