@@ -1,0 +1,27 @@
+---
+import Layout from '../layouts/Layout.astro';
+
+const response = await fetch('/api/posts', {
+  method: 'GET',
+  headers: { 'Content-Type': 'application/json' },
+});
+const data = await response.json();
+
+// Handle cases where data is an error object or an array of posts
+const posts = Array.isArray(data) ? data : [];
+const error = !Array.isArray(data) && data.error ? data.error : null;
+---
+<Layout title="Posts">
+  <h1 class="text-2xl font-bold mb-4">All Posts</h1>
+  <div class="space-y-4">
+    {error && <p class="text-red-500">Error loading posts: {error}</p>}
+    {posts.length === 0 && !error && <p class="text-gray-500">No posts available.</p>}
+    {posts.map(post => (
+      <div class="border p-4 rounded">
+        <h2 class="text-xl font-bold">{post.title}</h2>
+        <p>{post.content}</p>
+        <p class="text-sm text-gray-500">Posted on {new Date(post.created_at).toLocaleDateString()}</p>
+      </div>
+    ))}
+  </div>
+</Layout>

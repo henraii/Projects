@@ -1,0 +1,58 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+<Layout title="Create Post">
+  <div class="max-w-md mx-auto mt-8">
+    <h1 class="text-2xl font-bold mb-4">Create Post</h1>
+    <form id="post-form" class="space-y-4">
+      <div>
+        <label for="title" class="block">Title</label>
+        <input type="text" id="title" class="w-full p-2 border rounded" required />
+      </div>
+      <div>
+        <label for="content" class="block">Content</label>
+        <textarea id="content" class="w-full p-2 border rounded" rows="5" required></textarea>
+      </div>
+      <button type="submit" class="bg-blue-600 text-white p-2 rounded w-full">Create Post</button>
+    </form>
+  </div>
+
+  <script>
+    const form = document.getElementById('post-form');
+    form?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const titleInput = document.getElementById('title') as HTMLInputElement;
+      const contentInput = document.getElementById('content') as HTMLTextAreaElement;
+      const title = titleInput?.value;
+      const content = contentInput?.value;
+      const token = localStorage.getItem('token');
+
+      if (!token) {
+        alert('Please log in to create a post');
+        window.location.href = '/login';
+        return;
+      }
+
+      if (!title || !content) {
+        alert('Please fill in all fields');
+        return;
+      }
+
+      const response = await fetch('/api/posts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ title, content }),
+      });
+      const data = await response.json();
+
+      if (response.ok) {
+        window.location.href = '/posts';
+      } else {
+        alert('Error creating post: ' + data.error);
+      }
+    });
+  </script>
+</Layout>
