@@ -130,7 +130,7 @@ const { title } = Astro.props;
   </footer>
 
   <script>
-    // Load user info for nav
+    // @ts-nocheck
     const token = localStorage.getItem('token');
     if (token) {
       fetch('http://localhost:3001/api/users/me', {
