@@ -259,35 +259,69 @@ app.delete('/api/users/:userId/follow', authenticateToken, async (req, res) => {
 app.get('/api/posts', authenticateToken, async (req, res) => {
   try {
     const posts = await db.collection('posts')
-      .aggregate([
-        { $sort: { createdAt: -1 } },
-        { $limit: 50 },
-        {
-          $addFields: {
-            userObjectId: { $toObjectId: '$userId' }
-          }
-        },
-        {
-          $lookup: {
-            from: 'users',
-            localField: 'userObjectId',
-            foreignField: '_id',
-            as: 'author'
-          }
-        },
-        { $unwind: '$author' },
-        { 
-          $project: { 
-            'author.password': 0,
-            'userObjectId': 0
-          } 
-        }
-      ])
+      .find({})
+      .sort({ createdAt: -1 })
+      .limit(50)
       .toArray();
     
-    res.json(posts);
+    // Manually fetch author info for each post
+    const postsWithAuthors = await Promise.all(
+      posts.map(async (post) => {
+        const author = await db.collection('users').findOne(
+          { _id: new ObjectId(post.userId) },
+          { projection: { password: 0 } }
+        );
+        return { ...post, author };
+      })
+    );
+    
+    res.json(postsWithAuthors);
   } catch (error) {
     console.error('Get posts error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/posts/:postId', authenticateToken, async (req, res) => {
+  try {
+    const post = await db.collection('posts').findOne(
+      { _id: new ObjectId(req.params.postId) }
+    );
+
+    if (!post) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
+
+    // Fetch author
+    const author = await db.collection('users').findOne(
+      { _id: new ObjectId(post.userId) },
+      { projection: { password: 0 } }
+    );
+
+    // Populate comment authors
+    if (post.comments && post.comments.length > 0) {
+      const commentUserIds = [...new Set(post.comments.map(c => c.userId))];
+      const users = await db.collection('users')
+        .find(
+          { _id: { $in: commentUserIds.map(id => new ObjectId(id)) } },
+          { projection: { password: 0 } }
+        )
+        .toArray();
+      
+      const userMap = {};
+      users.forEach(u => {
+        userMap[u._id.toString()] = u;
+      });
+
+      post.comments = post.comments.map(comment => ({
+        ...comment,
+        author: userMap[comment.userId] || null
+      }));
+    }
+
+    res.json({ ...post, author });
+  } catch (error) {
+    console.error('Get post error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -432,6 +466,11 @@ app.get('/api/chats/:chatId/messages', authenticateToken, async (req, res) => {
     
     if (!chat) {
       return res.status(404).json({ error: 'Chat not found' });
+    }
+
+    // Check if user is a participant
+    if (!chat.participants.includes(req.user.userId)) {
+      return res.status(403).json({ error: 'Access denied' });
     }
 
     res.json(chat.messages || []);
