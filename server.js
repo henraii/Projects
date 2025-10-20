@@ -7,6 +7,9 @@ import cors from 'cors';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { MongoClient, ObjectId } from 'mongodb';
+import multer from 'multer'; // ← NEW: Added multer
+import path from 'path'; // ← NEW: Added path
+import fs from 'fs'; // ← NEW: Added fs
 
 const app = express();
 const httpServer = createServer(app);
@@ -259,35 +262,69 @@ app.delete('/api/users/:userId/follow', authenticateToken, async (req, res) => {
 app.get('/api/posts', authenticateToken, async (req, res) => {
   try {
     const posts = await db.collection('posts')
-      .aggregate([
-        { $sort: { createdAt: -1 } },
-        { $limit: 50 },
-        {
-          $addFields: {
-            userObjectId: { $toObjectId: '$userId' }
-          }
-        },
-        {
-          $lookup: {
-            from: 'users',
-            localField: 'userObjectId',
-            foreignField: '_id',
-            as: 'author'
-          }
-        },
-        { $unwind: '$author' },
-        { 
-          $project: { 
-            'author.password': 0,
-            'userObjectId': 0
-          } 
-        }
-      ])
+      .find({})
+      .sort({ createdAt: -1 })
+      .limit(50)
       .toArray();
     
-    res.json(posts);
+    // Manually fetch author info for each post
+    const postsWithAuthors = await Promise.all(
+      posts.map(async (post) => {
+        const author = await db.collection('users').findOne(
+          { _id: new ObjectId(post.userId) },
+          { projection: { password: 0 } }
+        );
+        return { ...post, author };
+      })
+    );
+    
+    res.json(postsWithAuthors);
   } catch (error) {
     console.error('Get posts error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/posts/:postId', authenticateToken, async (req, res) => {
+  try {
+    const post = await db.collection('posts').findOne(
+      { _id: new ObjectId(req.params.postId) }
+    );
+
+    if (!post) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
+
+    // Fetch author
+    const author = await db.collection('users').findOne(
+      { _id: new ObjectId(post.userId) },
+      { projection: { password: 0 } }
+    );
+
+    // Populate comment authors
+    if (post.comments && post.comments.length > 0) {
+      const commentUserIds = [...new Set(post.comments.map(c => c.userId))];
+      const users = await db.collection('users')
+        .find(
+          { _id: { $in: commentUserIds.map(id => new ObjectId(id)) } },
+          { projection: { password: 0 } }
+        )
+        .toArray();
+      
+      const userMap = {};
+      users.forEach(u => {
+        userMap[u._id.toString()] = u;
+      });
+
+      post.comments = post.comments.map(comment => ({
+        ...comment,
+        author: userMap[comment.userId] || null
+      }));
+    }
+
+    res.json({ ...post, author });
+  } catch (error) {
+    console.error('Get post error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -320,57 +357,122 @@ app.post('/api/posts', authenticateToken, async (req, res) => {
 
 app.post('/api/posts/:postId/like', authenticateToken, async (req, res) => {
   try {
-    const userId = req.user.userId;
     const postId = req.params.postId;
+    const userId = req.user.userId.toString();
 
     const post = await db.collection('posts').findOne({ _id: new ObjectId(postId) });
-    
-    if (!post) {
-      return res.status(404).json({ error: 'Post not found' });
-    }
+    if (!post) return res.status(404).json({ error: 'Post not found' });
 
     const isLiked = post.likes?.includes(userId);
-    
+
     await db.collection('posts').updateOne(
       { _id: new ObjectId(postId) },
-      isLiked 
-        ? { $pull: { likes: userId } }
-        : { $addToSet: { likes: userId } }
+      isLiked ? { $pull: { likes: userId } } : { $addToSet: { likes: userId } }
     );
 
-    res.json({ message: isLiked ? 'Unliked' : 'Liked' });
-  } catch (error) {
-    console.error('Like post error:', error);
+    const updatedPost = await db.collection('posts').findOne(
+      { _id: new ObjectId(postId) },
+      { projection: { likes: 1 } }
+    );
+
+    io.to(postId).emit('update-likes', { postId, likes: updatedPost.likes });
+    res.json({ likes: updatedPost.likes });
+  } catch (err) {
+    console.error('Like post error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-app.post('/api/posts/:postId/comment', authenticateToken, async (req, res) => {
+// 💬 Get all comments for a post
+app.get('/api/posts/:postId/comments', authenticateToken, async (req, res) => {
   try {
-    const { content } = req.body;
-    
-    if (!content) {
-      return res.status(400).json({ error: 'Comment content is required' });
-    }
+    const post = await db.collection('posts').findOne({ _id: new ObjectId(req.params.postId) });
+    if (!post) return res.status(404).json({ error: 'Post not found' });
+
+    const comments = post.comments || [];
+    const userIds = [...new Set(comments.map(c => c.userId))];
+    const users = await db.collection('users')
+      .find(
+        { _id: { $in: userIds.map(id => new ObjectId(id)) } },
+        { projection: { password: 0 } }
+      )
+      .toArray();
+
+    const userMap = Object.fromEntries(users.map(u => [u._id.toString(), u]));
+    const populated = comments.map(c => ({
+      ...c,
+      author: userMap[c.userId] || null
+    }));
+
+    res.json(populated);
+  } catch (error) {
+    console.error('Get comments error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// 💬 Add a new comment
+app.post('/api/posts/:postId/comments', authenticateToken, async (req, res) => {
+  try {
+    const { text } = req.body;
+    if (!text || text.trim().length === 0) return res.status(400).json({ error: 'Comment cannot be empty' });
+    if (text.length > 300) return res.status(400).json({ error: 'Comment too long (max 300 chars)' });
 
     const comment = {
-      _id: new ObjectId(),
-      userId: req.user.userId,
-      content,
+      _id: new ObjectId().toString(),
+      userId: req.user.userId.toString(),
+      text: text.trim(),
       createdAt: new Date()
     };
 
-    await db.collection('posts').updateOne(
+    const result = await db.collection('posts').updateOne(
       { _id: new ObjectId(req.params.postId) },
       { $push: { comments: comment } }
     );
 
-    res.status(201).json(comment);
+    if (result.modifiedCount === 0) return res.status(404).json({ error: 'Post not found' });
+
+    const user = await db.collection('users').findOne(
+      { _id: new ObjectId(req.user.userId) },
+      { projection: { password: 0 } }
+    );
+
+    const populatedComment = { ...comment, author: user };
+
+    // Emit only to users in this post's room
+    io.to(req.params.postId).emit('new-comment', { postId: req.params.postId, comment: populatedComment });
+
+    res.status(201).json(populatedComment);
   } catch (error) {
-    console.error('Comment error:', error);
+    console.error('Add comment error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
+
+// 🗑️ Delete comment (only by author)
+app.delete('/api/posts/:postId/comments/:commentId', authenticateToken, async (req, res) => {
+  try {
+    const { postId, commentId } = req.params;
+    const post = await db.collection('posts').findOne({ _id: new ObjectId(postId) });
+    if (!post) return res.status(404).json({ error: 'Post not found' });
+
+    const comment = post.comments.find(c => c._id === commentId);
+    if (!comment) return res.status(404).json({ error: 'Comment not found' });
+    if (comment.userId !== req.user.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    await db.collection('posts').updateOne(
+      { _id: new ObjectId(postId) },
+      { $pull: { comments: { _id: commentId } } }
+    );
+
+    io.to(postId).emit('delete-comment', { postId, commentId });
+    res.json({ message: 'Comment deleted' });
+  } catch (err) {
+    console.error('Delete comment error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 
 // CHAT ROUTES
 app.get('/api/chats', authenticateToken, async (req, res) => {
@@ -434,6 +536,11 @@ app.get('/api/chats/:chatId/messages', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Chat not found' });
     }
 
+    // Check if user is a participant
+    if (!chat.participants.includes(req.user.userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
     res.json(chat.messages || []);
   } catch (error) {
     console.error('Get messages error:', error);
@@ -444,15 +551,11 @@ app.get('/api/chats/:chatId/messages', authenticateToken, async (req, res) => {
 // SOCKET.IO for real-time chat
 io.use((socket, next) => {
   const token = socket.handshake.auth.token;
-  if (!token) {
-    return next(new Error('Authentication error: No token provided'));
-  }
+  if (!token) return next(new Error('Authentication error: No token provided'));
 
   jwt.verify(token, JWT_SECRET, (err, decoded) => {
-    if (err) {
-      return next(new Error('Authentication error: Invalid token'));
-    }
-    socket.userId = decoded.userId;
+    if (err) return next(new Error('Authentication error: Invalid token'));
+    socket.userId = decoded.userId.toString();
     next();
   });
 });
@@ -460,36 +563,88 @@ io.use((socket, next) => {
 io.on('connection', (socket) => {
   console.log('✅ User connected:', socket.userId);
 
+  // Join a post room for real-time comments/likes
+  socket.on('join-post', (postId) => {
+    socket.join(postId);
+    console.log(`User ${socket.userId} joined post room ${postId}`);
+  });
+
+  // Real-time chat room
   socket.on('join-chat', (chatId) => {
     socket.join(chatId);
     console.log(`User ${socket.userId} joined chat ${chatId}`);
   });
 
+  // Real-time chat message
   socket.on('send-message', async ({ chatId, content }) => {
+    if (!chatId || !content) return;
+
+    const message = {
+      _id: new ObjectId().toString(),
+      userId: socket.userId,
+      content,
+      createdAt: new Date()
+    };
+
     try {
-      if (!content || !chatId) {
-        return;
-      }
-
-      const message = {
-        _id: new ObjectId(),
-        userId: socket.userId,
-        content,
-        createdAt: new Date()
-      };
-
       await db.collection('chats').updateOne(
         { _id: new ObjectId(chatId) },
-        { 
+        {
           $push: { messages: message },
           $set: { lastMessageAt: new Date() }
         }
       );
 
       io.to(chatId).emit('new-message', { chatId, message });
-      console.log(`Message sent in chat ${chatId}`);
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('Error sending chat message:', error);
+    }
+  });
+
+  // Real-time post comment
+  socket.on('new-comment', async ({ postId, text }) => {
+    if (!postId || !text) return;
+
+    const comment = {
+      _id: new ObjectId().toString(),
+      userId: socket.userId,
+      text,
+      createdAt: new Date()
+    };
+
+    try {
+      await db.collection('posts').updateOne(
+        { _id: new ObjectId(postId) },
+        { $push: { comments: comment } }
+      );
+
+      io.to(postId).emit('new-comment', { postId, comment });
+    } catch (error) {
+      console.error('Error sending comment:', error);
+    }
+  });
+
+  // Real-time like/unlike
+  socket.on('toggle-like', async ({ postId }) => {
+    if (!postId) return;
+
+    try {
+      const post = await db.collection('posts').findOne({ _id: new ObjectId(postId) });
+      if (!post) return;
+
+      const hasLiked = post.likes.includes(socket.userId);
+
+      await db.collection('posts').updateOne(
+        { _id: new ObjectId(postId) },
+        hasLiked
+          ? { $pull: { likes: socket.userId } }
+          : { $addToSet: { likes: socket.userId } }
+      );
+
+      const updatedPost = await db.collection('posts').findOne({ _id: new ObjectId(postId) });
+      io.to(postId).emit('update-likes', { postId, likes: updatedPost.likes });
+    } catch (error) {
+      console.error('Error toggling like:', error);
     }
   });
 
@@ -497,6 +652,75 @@ io.on('connection', (socket) => {
     console.log('❌ User disconnected:', socket.userId);
   });
 });
+
+// ← NEW: Serve uploaded images
+app.use('/uploads', express.static('uploads'));
+// ← NEW: Multer setup for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/');
+  },
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ 
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed!'), false);
+    }
+  }
+});
+
+// ← NEW: Create uploads folder if it doesn't exist
+if (!fs.existsSync('uploads')) {
+  fs.mkdirSync('uploads');
+  console.log('📁 Created uploads folder');
+}
+// ← NEW: EDIT PROFILE ROUTE (PUT THIS HERE - AFTER LOGIN ROUTES)
+app.put('/api/users/:userId', authenticateToken, upload.single('avatar'), async (req, res) => {
+  try {
+    // Check if user is editing their own profile
+    if (req.user.userId !== req.params.userId) {
+      return res.status(403).json({ error: 'Unauthorized - You can only edit your own profile' });
+    }
+
+    const { displayName, bio } = req.body;
+    const updateData = { displayName, bio };
+
+    // Add avatar if uploaded
+    if (req.file) {
+      updateData.avatar = `/uploads/${req.file.filename}`;
+console.log(`🖼️ New avatar uploaded: ${updateData.avatar}`);
+    }
+
+    // Update user in database
+    const result = await db.collection('users').findOneAndUpdate(
+      { _id: new ObjectId(req.params.userId) },
+      { $set: updateData },
+      { returnDocument: 'after' }
+    );
+
+    if (!result.value) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Remove password from response
+    const { password, ...userWithoutPassword } = result.value;
+
+    console.log('✅ Profile updated successfully');
+    res.json(userWithoutPassword);
+  } catch (error) {
+    console.error('Update profile error:', error);
+    res.status(500).json({ error: 'Server error during profile update' });
+  }
+});
+
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -520,6 +744,7 @@ app.use((req, res) => {
 
 // Graceful shutdown
 process.on('SIGINT', async () => {
+  console.log(`🖼️ File uploads enabled at http://localhost:${PORT}/uploads`);
   console.log('\n🛑 Shutting down gracefully...');
   try {
     await client.close();

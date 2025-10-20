@@ -1,5 +1,4 @@
 ---
-// src/pages/home.astro
 import Layout from '../layouts/Layout.astro';
 ---
 <Layout title="Home">
@@ -90,141 +89,278 @@ import Layout from '../layouts/Layout.astro';
     </div>
   </div>
 
-  <script>
-    // @ts-nocheck
-    const API_URL = '/api';
-    const token = localStorage.getItem('token');
+  <!-- ✅ Load Socket.IO from CDN -->
+  <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
 
-    if (!token) {
-      window.location.href = '/login';
-    }
+<script type="module">
+// @ts-nocheck
+const API_URL = 'http://localhost:3001/api';
+const token = localStorage.getItem('token');
+if (!token) window.location.href = '/login';
 
-    let currentUser = null;
+let currentUser = null;
+const socket = io('http://localhost:3001', { auth: { token } });
 
-    // Load current user
-    async function loadCurrentUser() {
-      const res = await fetch(`${API_URL}/users/me`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      currentUser = await res.json();
-      document.getElementById('user-avatar').src = currentUser.avatar;
-    }
+// ==========================
+// 🔹 Helper Functions
+// ==========================
 
-    // Load posts
-    async function loadPosts() {
-      const res = await fetch(`${API_URL}/posts`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const posts = await res.json();
-      
-      const container = document.getElementById('posts-container');
-      container.innerHTML = posts.map(post => `
-        <div class="bg-white rounded-lg shadow-md overflow-hidden">
-          <div class="p-6">
-            <div class="flex items-center space-x-3 mb-4">
-              <img src="${post.author.avatar}" class="w-10 h-10 rounded-full" />
-              <div>
-                <h4 class="font-semibold">${post.author.displayName}</h4>
-                <p class="text-sm text-gray-500">${new Date(post.createdAt).toLocaleDateString()}</p>
-              </div>
-            </div>
-            <h3 class="text-xl font-bold mb-2">${post.title}</h3>
-            <p class="text-gray-700 mb-4">${post.content}</p>
-            ${post.tags?.length ? `
-              <div class="flex flex-wrap gap-2 mb-4">
-                ${post.tags.map(tag => `<span class="bg-blue-100 text-blue-600 px-3 py-1 rounded-full text-sm">${tag}</span>`).join('')}
-              </div>
-            ` : ''}
-            <div class="flex items-center space-x-6 pt-4 border-t">
-              <button onclick="likePost('${post._id}')" class="flex items-center space-x-2 text-gray-600 hover:text-blue-600">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5"></path>
-                </svg>
-                <span>${post.likes?.length || 0}</span>
-              </button>
-              <button class="flex items-center space-x-2 text-gray-600 hover:text-blue-600">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
-                </svg>
-                <span>${post.comments?.length || 0}</span>
-              </button>
-            </div>
+// Render a single comment
+function renderComment(c, postId) {
+  const own = c.userId === currentUser._id;
+  return `
+    <div id="comment-${c._id}" class="flex items-start space-x-3">
+      <img src="${c.author?.avatar || '/default.png'}" class="w-8 h-8 rounded-full">
+      <div class="bg-white rounded-lg p-3 shadow-sm w-full relative">
+        <p class="text-sm font-semibold">${c.author?.displayName || 'Unknown'}</p>
+        <p class="text-gray-700 text-sm">${c.text}</p>
+        ${own ? `<button onclick="deleteComment('${postId}', '${c._id}')" class="absolute top-1 right-2 text-gray-400 hover:text-red-500 text-xs">🗑️</button>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+// Update comment counter
+function updateCommentCount(postId, delta) {
+  const el = document.getElementById(`comment-count-${postId}`);
+  if (el) el.textContent = parseInt(el.textContent) + delta;
+}
+
+// Update character counter
+window.updateCounter = (input, postId) => {
+  document.getElementById(`counter-${postId}`).textContent = `${input.value.length} / 300`;
+}
+
+// ==========================
+// 🔹 Load Current User
+// ==========================
+async function loadCurrentUser() {
+  const res = await fetch(`${API_URL}/users/me`, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  currentUser = await res.json();
+  document.getElementById('user-avatar').src = currentUser.avatar;
+}
+
+// ==========================
+// 🔹 Load Posts
+// ==========================
+async function loadPosts() {
+  const res = await fetch(`${API_URL}/posts`, { headers: { 'Authorization': `Bearer ${token}` } });
+  const posts = await res.json();
+  const container = document.getElementById('posts-container');
+
+  if (!posts || !posts.length) {
+    container.innerHTML = '<p class="text-gray-500 text-center py-8">No posts yet.</p>';
+    return;
+  }
+
+  container.innerHTML = posts.map(post => `
+    <div class="bg-white rounded-lg shadow-md overflow-hidden" id="post-${post._id}">
+      <div class="p-6">
+        <div class="flex items-center space-x-3 mb-4">
+          <img src="${post.author.avatar}" class="w-10 h-10 rounded-full" />
+          <div>
+            <h4 class="font-semibold">${post.author.displayName}</h4>
+            <p class="text-sm text-gray-500">${new Date(post.createdAt).toLocaleDateString()}</p>
           </div>
         </div>
-      `).join('');
+        <h3 class="text-xl font-bold mb-2">${post.title}</h3>
+        <p class="text-gray-700 mb-4">${post.content}</p>
+        ${post.tags?.length ? `
+          <div class="flex flex-wrap gap-2 mb-4">
+            ${post.tags.map(tag => `<span class="bg-blue-100 text-blue-600 px-3 py-1 rounded-full text-sm">${tag}</span>`).join('')}
+          </div>` : ''}
+        <div class="flex items-center space-x-6 pt-4 border-t">
+          <button onclick="likePost('${post._id}')" class="flex items-center space-x-2 text-gray-600 hover:text-blue-600">
+            ❤️ <span id="like-count-${post._id}">${post.likes?.length || 0}</span>
+          </button>
+          <button onclick="toggleComments('${post._id}')" class="flex items-center space-x-2 text-gray-600 hover:text-blue-600">
+            💬 <span id="comment-count-${post._id}">${post.comments?.length || 0}</span>
+          </button>
+        </div>
+      </div>
+      <div id="comments-${post._id}" class="hidden border-t bg-gray-50 p-4"></div>
+    </div>
+  `).join('');
+}
+
+// ==========================
+// 🔹 Toggle / Load Comments
+// ==========================
+async function toggleComments(postId) {
+  const section = document.getElementById(`comments-${postId}`);
+  if (section.classList.contains('hidden')) {
+    await loadComments(postId);
+    section.classList.remove('hidden');
+  } else {
+    section.classList.add('hidden');
+  }
+}
+
+async function loadComments(postId) {
+  const res = await fetch(`${API_URL}/posts/${postId}/comments`, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  const comments = await res.json();
+  const section = document.getElementById(`comments-${postId}`);
+  section.innerHTML = `
+    <div class="space-y-3">
+      ${comments.map(c => renderComment(c, postId)).join('')}
+    </div>
+    <form onsubmit="addComment(event, '${postId}')" class="mt-4">
+      <div class="flex space-x-2 items-center">
+        <input type="text" name="comment" maxlength="300" placeholder="Write a comment..."
+          oninput="updateCounter(this, '${postId}')"
+          class="flex-1 border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-600" required>
+        <button class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Post</button>
+      </div>
+      <p id="counter-${postId}" class="text-xs text-gray-500 mt-1">0 / 300</p>
+    </form>
+  `;
+}
+
+// ==========================
+// 🔹 Add / Delete Comments
+// ==========================
+window.addComment = async (e, postId) => {
+  e.preventDefault();
+  const input = e.target.comment;
+  const text = input.value.trim();
+  if (!text) return;
+
+  const res = await fetch(`${API_URL}/posts/${postId}/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify({ text })
+  });
+
+  const comment = await res.json();
+  if (!comment.error) {
+    input.value = '';
+    updateCounter(input, postId);
+
+    // Emit new comment to server for real-time updates
+    socket.emit('new-comment', { postId, comment });
+
+    // Update locally if section visible
+    const section = document.getElementById(`comments-${postId}`);
+    if (section && !section.classList.contains('hidden')) {
+      const list = section.querySelector('.space-y-3');
+      list.insertAdjacentHTML('beforeend', renderComment(comment, postId));
+      updateCommentCount(postId, 1);
     }
+  }
+};
 
-    // Search users
-    let searchTimeout;
-    document.getElementById('user-search').addEventListener('input', (e) => {
-      clearTimeout(searchTimeout);
-      searchTimeout = setTimeout(async () => {
-        const query = e.target.value.trim();
-        if (!query) {
-          document.getElementById('search-results').innerHTML = '';
-          return;
-        }
+window.deleteComment = async (postId, commentId) => {
+  const res = await fetch(`${API_URL}/posts/${postId}/comments/${commentId}`, {
+    method: 'DELETE',
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  if (res.ok) {
+    document.getElementById(`comment-${commentId}`)?.remove();
+    updateCommentCount(postId, -1);
+  }
+};
 
-        const res = await fetch(`${API_URL}/users/search?q=${query}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const users = await res.json();
-        
-        document.getElementById('search-results').innerHTML = users.map(user => `
-          <a href="/profile/${user._id}" class="flex items-center space-x-3 p-2 hover:bg-gray-50 rounded-lg">
-            <img src="${user.avatar}" class="w-10 h-10 rounded-full" />
-            <div>
-              <p class="font-semibold text-sm">${user.displayName}</p>
-              <p class="text-xs text-gray-500">@${user.username}</p>
-            </div>
-          </a>
-        `).join('');
-      }, 300);
-    });
+// ==========================
+// 🔹 Like Post
+// ==========================
+window.likePost = async (postId) => {
+  socket.emit('toggle-like', { postId });
+};
 
-    // Modal controls
-    document.getElementById('create-post-btn').addEventListener('click', () => {
-      document.getElementById('create-modal').classList.remove('hidden');
-    });
+// ==========================
+// 🔹 User Search with Debounce
+// ==========================
+let searchTimeout;
+document.getElementById('user-search').addEventListener('input', (e) => {
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(async () => {
+    const query = e.target.value.trim();
+    if (!query) return document.getElementById('search-results').innerHTML = '';
+    const res = await fetch(`${API_URL}/users/search?q=${query}`, { headers: { 'Authorization': `Bearer ${token}` } });
+    const users = await res.json();
+    document.getElementById('search-results').innerHTML = users.map(u => `
+      <a href="/profile/${u._id}" class="flex items-center space-x-3 p-2 hover:bg-gray-50 rounded-lg">
+        <img src="${u.avatar}" class="w-10 h-10 rounded-full" />
+        <div>
+          <p class="font-semibold text-sm">${u.displayName}</p>
+          <p class="text-xs text-gray-500">@${u.username}</p>
+        </div>
+      </a>
+    `).join('');
+  }, 300);
+});
 
-    document.getElementById('close-modal').addEventListener('click', () => {
-      document.getElementById('create-modal').classList.add('hidden');
-    });
+// ==========================
+// 🔹 Socket.IO Real-time Listeners
+// ==========================
+socket.on('new-comment', ({ postId, comment }) => {
+  const section = document.getElementById(`comments-${postId}`);
+  if (!section) return;
+  const list = section.querySelector('.space-y-3') || (() => {
+    const div = document.createElement('div');
+    div.className = 'space-y-3';
+    section.prepend(div);
+    return div;
+  })();
+  list.insertAdjacentHTML('beforeend', renderComment(comment, postId));
+  updateCommentCount(postId, 1);
+});
 
-    // Create post
-    document.getElementById('post-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const title = document.getElementById('post-title').value;
-      const content = document.getElementById('post-content').value;
-      const tags = document.getElementById('post-tags').value.split(',').map(t => t.trim()).filter(t => t);
+socket.on('delete-comment', ({ postId, commentId }) => {
+  document.getElementById(`comment-${commentId}`)?.remove();
+  updateCommentCount(postId, -1);
+});
 
-      const res = await fetch(`${API_URL}/posts`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ title, content, tags })
-      });
+socket.on('update-likes', ({ postId, likes }) => {
+  const likeEl = document.getElementById(`like-count-${postId}`);
+  if (likeEl) likeEl.textContent = likes.length;
+});
 
-      if (res.ok) {
-        document.getElementById('create-modal').classList.add('hidden');
-        document.getElementById('post-form').reset();
-        loadPosts();
-      }
-    });
+// ==========================
+// 🔹 Modal Controls
+// ==========================
+document.getElementById('create-post-btn').addEventListener('click', () => {
+  document.getElementById('create-modal').classList.remove('hidden');
+});
+document.getElementById('close-modal').addEventListener('click', () => {
+  document.getElementById('create-modal').classList.add('hidden');
+});
 
-    // Like post
-    window.likePost = async (postId) => {
-      await fetch(`${API_URL}/posts/${postId}/like`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      loadPosts();
-    };
+// ==========================
+// 🔹 Create Post
+// ==========================
+document.getElementById('post-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const title = document.getElementById('post-title').value.trim();
+  const content = document.getElementById('post-content').value.trim();
+  const tags = document.getElementById('post-tags').value.split(',').map(t => t.trim()).filter(t => t);
 
-    // Initialize
-    loadCurrentUser();
-    loadPosts();
-  </script>
+  if (!title || !content) return;
+
+  const res = await fetch(`${API_URL}/posts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify({ title, content, tags })
+  });
+
+  if (res.ok) {
+    document.getElementById('create-modal').classList.add('hidden');
+    document.getElementById('post-form').reset();
+    await loadPosts();
+  }
+});
+
+// ==========================
+// 🔹 Init
+// ==========================
+(async () => {
+  await loadCurrentUser();
+  await loadPosts();
+})();
+</script>
+
 </Layout>

@@ -1,4 +1,4 @@
-    ---
+---
 // src/pages/chat.astro
 import Layout from '../layouts/Layout.astro';
 ---
@@ -70,7 +70,7 @@ import Layout from '../layouts/Layout.astro';
 
   <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
   <script>
-     // @ts-nocheck
+    // @ts-nocheck
     const API_URL = 'http://localhost:3001/api';
     const SOCKET_URL = 'http://localhost:3001';
     const token = localStorage.getItem('token');
@@ -83,6 +83,7 @@ import Layout from '../layouts/Layout.astro';
     let currentUser;
     let currentChatId;
     let currentRecipient;
+    let userCache = {};
 
     // Initialize Socket.IO
     function initSocket() {
@@ -91,7 +92,11 @@ import Layout from '../layouts/Layout.astro';
       });
 
       socket.on('connect', () => {
-        console.log('Connected to chat server');
+        console.log('✅ Connected to chat server');
+      });
+
+      socket.on('connect_error', (error) => {
+        console.error('Socket connection error:', error);
       });
 
       socket.on('new-message', ({ chatId, message }) => {
@@ -104,70 +109,133 @@ import Layout from '../layouts/Layout.astro';
 
     // Load current user
     async function loadCurrentUser() {
-      const res = await fetch(`${API_URL}/users/me`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      currentUser = await res.json();
+      try {
+        const res = await fetch(`${API_URL}/users/me`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Failed to load user');
+        currentUser = await res.json();
+        userCache[currentUser._id] = currentUser;
+      } catch (error) {
+        console.error('Error loading user:', error);
+        localStorage.removeItem('token');
+        window.location.href = '/login';
+      }
+    }
+
+    // Get user by ID with caching
+    async function getUserById(userId) {
+      if (userCache[userId]) {
+        return userCache[userId];
+      }
+
+      try {
+        const res = await fetch(`${API_URL}/users/${userId}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Failed to load user');
+        const user = await res.json();
+        userCache[userId] = user;
+        return user;
+      } catch (error) {
+        console.error('Error loading user:', error);
+        return {
+          displayName: 'Unknown User',
+          username: 'unknown',
+          avatar: 'https://ui-avatars.com/api/?name=U'
+        };
+      }
     }
 
     // Load chats
     async function loadChats() {
-      const res = await fetch(`${API_URL}/chats`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const chats = await res.json();
+      try {
+        const res = await fetch(`${API_URL}/chats`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Failed to load chats');
+        const chats = await res.json();
 
-      const chatList = document.getElementById('chat-list');
-      chatList.innerHTML = chats.length ? chats.map(chat => {
-        const otherUserId = chat.participants.find(p => p !== currentUser._id);
-        return `
-          <div onclick="openChat('${chat._id}', '${otherUserId}')" class="p-4 hover:bg-gray-50 cursor-pointer border-b border-gray-100">
-            <div class="flex items-center space-x-3">
-              <div class="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center text-white font-semibold">
-                U
+        const chatList = document.getElementById('chat-list');
+        
+        if (chats.length === 0) {
+          chatList.innerHTML = '<p class="p-4 text-center text-gray-500">No conversations yet<br/><span class="text-sm">Search for users on the home page to start chatting</span></p>';
+          return;
+        }
+
+        // Load user details for all participants
+        const chatElements = await Promise.all(chats.map(async (chat) => {
+          const otherUserId = chat.participants.find(p => p !== currentUser._id);
+          const otherUser = await getUserById(otherUserId);
+          const lastMessage = chat.messages && chat.messages.length > 0 
+            ? chat.messages[chat.messages.length - 1] 
+            : null;
+
+          return {
+            chatId: chat._id,
+            userId: otherUserId,
+            html: `
+              <div onclick="openChat('${chat._id}', '${otherUserId}')" class="p-4 hover:bg-gray-50 cursor-pointer border-b border-gray-100 transition">
+                <div class="flex items-center space-x-3">
+                  <img src="${otherUser.avatar}" class="w-12 h-12 rounded-full" alt="${otherUser.displayName}" />
+                  <div class="flex-1 overflow-hidden">
+                    <div class="flex justify-between items-baseline">
+                      <p class="font-semibold truncate">${otherUser.displayName}</p>
+                      ${lastMessage ? `<span class="text-xs text-gray-500">${new Date(lastMessage.createdAt).toLocaleDateString()}</span>` : ''}
+                    </div>
+                    <p class="text-sm text-gray-500 truncate">@${otherUser.username}</p>
+                    ${lastMessage ? `<p class="text-sm text-gray-600 truncate mt-1">${lastMessage.content}</p>` : '<p class="text-sm text-gray-400 italic">No messages yet</p>'}
+                  </div>
+                </div>
               </div>
-              <div class="flex-1">
-                <p class="font-semibold">User ${otherUserId.substring(0, 8)}</p>
-                <p class="text-sm text-gray-500">${chat.messages[chat.messages.length - 1]?.content || 'Start conversation'}</p>
-              </div>
-            </div>
-          </div>
-        `;
-      }).join('') : '<p class="p-4 text-center text-gray-500">No conversations yet</p>';
+            `
+          };
+        }));
+
+        chatList.innerHTML = chatElements.map(c => c.html).join('');
+      } catch (error) {
+        console.error('Error loading chats:', error);
+        document.getElementById('chat-list').innerHTML = '<p class="p-4 text-center text-red-600">Error loading conversations</p>';
+      }
     }
 
     // Open chat
     window.openChat = async (chatId, recipientId) => {
-      currentChatId = chatId;
+      try {
+        currentChatId = chatId;
 
-      // Load recipient info
-      const res = await fetch(`${API_URL}/users/${recipientId}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      currentRecipient = await res.json();
+        // Load recipient info
+        currentRecipient = await getUserById(recipientId);
 
-      // Update UI
-      document.getElementById('no-chat-selected').classList.add('hidden');
-      document.getElementById('chat-window').classList.remove('hidden');
-      document.getElementById('chat-window').classList.add('flex');
-      
-      document.getElementById('chat-avatar').src = currentRecipient.avatar;
-      document.getElementById('chat-name').textContent = currentRecipient.displayName;
-      document.getElementById('chat-username').textContent = '@' + currentRecipient.username;
+        // Update UI
+        document.getElementById('no-chat-selected').classList.add('hidden');
+        document.getElementById('chat-window').classList.remove('hidden');
+        document.getElementById('chat-window').classList.add('flex');
+        
+        document.getElementById('chat-avatar').src = currentRecipient.avatar;
+        document.getElementById('chat-name').textContent = currentRecipient.displayName;
+        document.getElementById('chat-username').textContent = '@' + currentRecipient.username;
 
-      // Join socket room
-      socket.emit('join-chat', chatId);
+        // Join socket room
+        if (socket && socket.connected) {
+          socket.emit('join-chat', chatId);
+        }
 
-      // Load messages
-      const messagesRes = await fetch(`${API_URL}/chats/${chatId}/messages`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const messages = await messagesRes.json();
+        // Load messages
+        const messagesRes = await fetch(`${API_URL}/chats/${chatId}/messages`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!messagesRes.ok) throw new Error('Failed to load messages');
+        const messages = await messagesRes.json();
 
-      const container = document.getElementById('messages-container');
-      container.innerHTML = '';
-      messages.forEach(addMessageToUI);
-      container.scrollTop = container.scrollHeight;
+        const container = document.getElementById('messages-container');
+        container.innerHTML = '';
+        messages.forEach(addMessageToUI);
+        container.scrollTop = container.scrollHeight;
+      } catch (error) {
+        console.error('Error opening chat:', error);
+        alert('Error opening chat');
+      }
     };
 
     // Add message to UI
@@ -179,8 +247,8 @@ import Layout from '../layouts/Layout.astro';
       messageEl.className = `flex ${isOwn ? 'justify-end' : 'justify-start'}`;
       messageEl.innerHTML = `
         <div class="max-w-xs lg:max-w-md">
-          <div class="${isOwn ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-800'} rounded-2xl px-4 py-2">
-            <p>${message.content}</p>
+          <div class="${isOwn ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-800'} rounded-2xl px-4 py-2 break-words">
+            <p>${escapeHtml(message.content)}</p>
           </div>
           <p class="text-xs text-gray-500 mt-1 ${isOwn ? 'text-right' : 'text-left'}">
             ${new Date(message.createdAt).toLocaleTimeString()}
@@ -192,18 +260,27 @@ import Layout from '../layouts/Layout.astro';
       container.scrollTop = container.scrollHeight;
     }
 
+    // Escape HTML to prevent XSS
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
     // Send message
     document.getElementById('message-form').addEventListener('submit', (e) => {
       e.preventDefault();
       const input = document.getElementById('message-input');
       const content = input.value.trim();
 
-      if (content && currentChatId) {
+      if (content && currentChatId && socket && socket.connected) {
         socket.emit('send-message', {
           chatId: currentChatId,
           content
         });
         input.value = '';
+      } else if (!socket || !socket.connected) {
+        alert('Connection lost. Please refresh the page.');
       }
     });
 
@@ -211,22 +288,37 @@ import Layout from '../layouts/Layout.astro';
     const urlParams = new URLSearchParams(window.location.search);
     const recipientId = urlParams.get('user');
 
-    if (recipientId) {
-      fetch(`${API_URL}/chats`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ recipientId })
-      }).then(res => res.json())
-        .then(chat => {
-          openChat(chat._id, recipientId);
-        });
+    async function startNewChat() {
+      if (recipientId && recipientId !== currentUser._id) {
+        try {
+          const res = await fetch(`${API_URL}/chats`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ recipientId })
+          });
+          if (!res.ok) throw new Error('Failed to create chat');
+          const chat = await res.json();
+          await loadChats();
+          await openChat(chat._id, recipientId);
+        } catch (error) {
+          console.error('Error creating chat:', error);
+        }
+      }
     }
 
     // Initialize
-    initSocket();
-    loadCurrentUser().then(loadChats);
+    async function initialize() {
+      await loadCurrentUser();
+      initSocket();
+      await loadChats();
+      if (recipientId) {
+        await startNewChat();
+      }
+    }
+
+    initialize();
   </script>
 </Layout>
