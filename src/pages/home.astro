@@ -93,7 +93,7 @@ import Layout from '../layouts/Layout.astro';
 
 <script type="module">
 // @ts-nocheck
-const API_URL = 'http://localhost:3001/api';
+const API_URL = 'https://myblog-v804.onrender.com';
 const token = localStorage.getItem('token');
 if (!token) window.location.href = '/login';
 
@@ -103,7 +103,7 @@ const joinedPosts = new Set();
 
 // Initialize Socket.IO
 function initSocket() {
-  socket = io('http://localhost:3001', { 
+  socket = io('https://myblog-v804.onrender.com', {
     auth: { token },
     reconnection: true,
     reconnectionDelay: 1000,

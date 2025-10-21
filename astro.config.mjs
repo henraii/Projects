@@ -8,8 +8,11 @@ export default defineConfig({
   adapter: node({
     mode: 'standalone'
   }),
-  // REDIRECT / to /home (KEEPS your home.astro)
   redirects: {
     '/': '/home'
+  },
+  server: {
+    port: 4321,
+    host: true
   }
 });

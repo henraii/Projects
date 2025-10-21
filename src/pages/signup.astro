@@ -91,7 +91,7 @@
 
   <script>
     // @ts-nocheck
-    const API_URL = 'http://localhost:3001/api';
+    const API_URL = 'https://myblog-v804.onrender.com';
     
     document.getElementById('signup-form').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -108,7 +108,7 @@
       }
 
       try {
-        const res = await fetch(`${API_URL}/signup`, {
+        const res = await fetch(`${API_URL}/api/signup`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ displayName, username, email, password })

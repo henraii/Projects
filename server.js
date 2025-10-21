@@ -15,7 +15,7 @@ const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: "http://localhost:4321",
+    origin: "https://myblog-v804.onrender.com",
     methods: ["GET", "POST", "PUT", "DELETE"]
   }
 });
@@ -757,12 +757,13 @@ process.on('SIGINT', async () => {
 
 // Start server
 connectDB().then(() => {
-  httpServer.listen(PORT, () => {
-    console.log(`\n🚀 Server running on http://localhost:${PORT}`);
-    console.log(`📡 API available at http://localhost:${PORT}/api`);
-    console.log(`💬 WebSocket server ready for connections`);
-    console.log(`🖼️ File uploads enabled at http://localhost:${PORT}/uploads`);
-  });
+  const PORT = process.env.PORT || 3001; // Render sets process.env.PORT
+httpServer.listen(PORT, () => {
+  console.log(`\n🚀 Server running on http://0.0.0.0:${PORT}`); // Use 0.0.0.0 for Render
+  console.log(`📡 API available at http://0.0.0.0:${PORT}/api`);
+  console.log(`💬 WebSocket server ready for connections`);
+  console.log(`🖼️ File uploads enabled at http://0.0.0.0:${PORT}/uploads`);
+});
 }).catch(error => {
   console.error('Failed to start server:', error);
   process.exit(1);
