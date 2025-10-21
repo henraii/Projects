@@ -32,7 +32,7 @@
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
     "mongodb": "^6.20.0",
-    "multer": "^2.0.2",
+    "multer": "^1.4.4",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
     "tailwindcss": "^3.4.17"
