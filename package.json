@@ -8,6 +8,7 @@
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:backend": "nodemon server.js",
     "dev:frontend": "astro dev",
+    "start": "node server.js",
     "start:backend": "node server.js",
     "build": "astro build",
     "preview": "astro preview",

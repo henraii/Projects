@@ -89,7 +89,6 @@ import Layout from '../layouts/Layout.astro';
     </div>
   </div>
 
-  <!-- ✅ Load Socket.IO from CDN -->
   <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
 
 <script type="module">
@@ -99,22 +98,91 @@ const token = localStorage.getItem('token');
 if (!token) window.location.href = '/login';
 
 let currentUser = null;
-const socket = io('http://localhost:3001', { auth: { token } });
+let socket = null;
+const joinedPosts = new Set();
 
-// ==========================
-// 🔹 Helper Functions
-// ==========================
+// Initialize Socket.IO
+function initSocket() {
+  socket = io('http://localhost:3001', { 
+    auth: { token },
+    reconnection: true,
+    reconnectionDelay: 1000,
+    reconnectionAttempts: 5
+  });
+
+  socket.on('connect', () => {
+    console.log('✅ Connected to socket server');
+    // Rejoin all visible posts
+    joinedPosts.forEach(postId => {
+      socket.emit('join-post', postId);
+    });
+  });
+
+  socket.on('connect_error', (error) => {
+    console.error('Socket connection error:', error);
+  });
+
+  // Listen for new comments
+  socket.on('new-comment', ({ postId, comment }) => {
+    console.log('New comment received:', postId, comment);
+    const section = document.getElementById(`comments-${postId}`);
+    if (section && !section.classList.contains('hidden')) {
+      const list = section.querySelector('.space-y-3');
+      if (list) {
+        const commentHtml = renderComment(comment, postId);
+        list.insertAdjacentHTML('beforeend', commentHtml);
+        updateCommentCount(postId, 1);
+      }
+    } else {
+      // Update count even if section is hidden
+      updateCommentCount(postId, 1);
+    }
+  });
+
+  // Listen for deleted comments
+  socket.on('delete-comment', ({ postId, commentId }) => {
+    console.log('Comment deleted:', postId, commentId);
+    const commentEl = document.getElementById(`comment-${commentId}`);
+    if (commentEl) {
+      commentEl.remove();
+      updateCommentCount(postId, -1);
+    }
+  });
+
+  // Listen for like updates
+  socket.on('update-likes', ({ postId, likes }) => {
+    console.log('Likes updated:', postId, likes);
+    const likeBtn = document.getElementById(`like-btn-${postId}`);
+    const likeCount = document.getElementById(`like-count-${postId}`);
+    
+    if (likeCount) {
+      likeCount.textContent = likes.length;
+    }
+    
+    if (likeBtn && currentUser) {
+      const isLiked = likes.includes(currentUser._id);
+      if (isLiked) {
+        likeBtn.innerHTML = '❤️';
+        likeBtn.classList.add('text-red-500');
+      } else {
+        likeBtn.innerHTML = '🤍';
+        likeBtn.classList.remove('text-red-500');
+      }
+    }
+  });
+}
 
 // Render a single comment
 function renderComment(c, postId) {
   const own = c.userId === currentUser._id;
   return `
     <div id="comment-${c._id}" class="flex items-start space-x-3">
-      <img src="${c.author?.avatar || '/default.png'}" class="w-8 h-8 rounded-full">
-      <div class="bg-white rounded-lg p-3 shadow-sm w-full relative">
+      <img src="${c.author?.avatar || 'https://ui-avatars.com/api/?name=U'}" class="w-8 h-8 rounded-full">
+      <div class="bg-gray-100 rounded-lg p-3 w-full relative">
         <p class="text-sm font-semibold">${c.author?.displayName || 'Unknown'}</p>
-        <p class="text-gray-700 text-sm">${c.text}</p>
-        ${own ? `<button onclick="deleteComment('${postId}', '${c._id}')" class="absolute top-1 right-2 text-gray-400 hover:text-red-500 text-xs">🗑️</button>` : ''}
+        <p class="text-gray-700 text-sm">${escapeHtml(c.text)}</p>
+        <p class="text-xs text-gray-500 mt-1">${new Date(c.createdAt).toLocaleTimeString()}</p>
+        ${own ? `<button onclick="deleteComment('${postId}', '${c._id}')" class="absolute top-2 right-2 text-gray-400 hover:text-red-500 text-xs">🗑️</button>` : ''}
       </div>
     </div>
   `;
@@ -123,242 +191,328 @@ function renderComment(c, postId) {
 // Update comment counter
 function updateCommentCount(postId, delta) {
   const el = document.getElementById(`comment-count-${postId}`);
-  if (el) el.textContent = parseInt(el.textContent) + delta;
+  if (el) {
+    const current = parseInt(el.textContent) || 0;
+    el.textContent = Math.max(0, current + delta);
+  }
 }
 
 // Update character counter
 window.updateCounter = (input, postId) => {
-  document.getElementById(`counter-${postId}`).textContent = `${input.value.length} / 300`;
-}
-
-// ==========================
-// 🔹 Load Current User
-// ==========================
-async function loadCurrentUser() {
-  const res = await fetch(`${API_URL}/users/me`, {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  currentUser = await res.json();
-  document.getElementById('user-avatar').src = currentUser.avatar;
-}
-
-// ==========================
-// 🔹 Load Posts
-// ==========================
-async function loadPosts() {
-  const res = await fetch(`${API_URL}/posts`, { headers: { 'Authorization': `Bearer ${token}` } });
-  const posts = await res.json();
-  const container = document.getElementById('posts-container');
-
-  if (!posts || !posts.length) {
-    container.innerHTML = '<p class="text-gray-500 text-center py-8">No posts yet.</p>';
-    return;
+  const counter = document.getElementById(`counter-${postId}`);
+  if (counter) {
+    counter.textContent = `${input.value.length} / 300`;
   }
-
-  container.innerHTML = posts.map(post => `
-    <div class="bg-white rounded-lg shadow-md overflow-hidden" id="post-${post._id}">
-      <div class="p-6">
-        <div class="flex items-center space-x-3 mb-4">
-          <img src="${post.author.avatar}" class="w-10 h-10 rounded-full" />
-          <div>
-            <h4 class="font-semibold">${post.author.displayName}</h4>
-            <p class="text-sm text-gray-500">${new Date(post.createdAt).toLocaleDateString()}</p>
-          </div>
-        </div>
-        <h3 class="text-xl font-bold mb-2">${post.title}</h3>
-        <p class="text-gray-700 mb-4">${post.content}</p>
-        ${post.tags?.length ? `
-          <div class="flex flex-wrap gap-2 mb-4">
-            ${post.tags.map(tag => `<span class="bg-blue-100 text-blue-600 px-3 py-1 rounded-full text-sm">${tag}</span>`).join('')}
-          </div>` : ''}
-        <div class="flex items-center space-x-6 pt-4 border-t">
-          <button onclick="likePost('${post._id}')" class="flex items-center space-x-2 text-gray-600 hover:text-blue-600">
-            ❤️ <span id="like-count-${post._id}">${post.likes?.length || 0}</span>
-          </button>
-          <button onclick="toggleComments('${post._id}')" class="flex items-center space-x-2 text-gray-600 hover:text-blue-600">
-            💬 <span id="comment-count-${post._id}">${post.comments?.length || 0}</span>
-          </button>
-        </div>
-      </div>
-      <div id="comments-${post._id}" class="hidden border-t bg-gray-50 p-4"></div>
-    </div>
-  `).join('');
 }
 
-// ==========================
-// 🔹 Toggle / Load Comments
-// ==========================
+// Escape HTML to prevent XSS
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// Load Current User
+async function loadCurrentUser() {
+  try {
+    const res = await fetch(`${API_URL}/users/me`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!res.ok) throw new Error('Failed to load user');
+    currentUser = await res.json();
+    const avatarEl = document.getElementById('user-avatar');
+    if (avatarEl) {
+      avatarEl.src = currentUser.avatar;
+    }
+  } catch (error) {
+    console.error('Error loading user:', error);
+    localStorage.removeItem('token');
+    window.location.href = '/login';
+  }
+}
+
+// Load Posts
+async function loadPosts() {
+  try {
+    const res = await fetch(`${API_URL}/posts`, { 
+      headers: { 'Authorization': `Bearer ${token}` } 
+    });
+    
+    if (!res.ok) throw new Error('Failed to load posts');
+    
+    const posts = await res.json();
+    const container = document.getElementById('posts-container');
+
+    if (!posts || !posts.length) {
+      container.innerHTML = '<p class="text-gray-500 text-center py-8">No posts yet. Be the first to post!</p>';
+      return;
+    }
+
+    container.innerHTML = posts.map(post => {
+      const isLiked = post.likes?.includes(currentUser._id);
+      return `
+        <div class="bg-white rounded-lg shadow-md overflow-hidden" id="post-${post._id}">
+          <div class="p-6">
+            <div class="flex items-center space-x-3 mb-4">
+              <img src="${post.author?.avatar || 'https://ui-avatars.com/api/?name=U'}" class="w-10 h-10 rounded-full" />
+              <div>
+                <h4 class="font-semibold">${post.author?.displayName || 'Unknown'}</h4>
+                <p class="text-sm text-gray-500">${new Date(post.createdAt).toLocaleDateString()}</p>
+              </div>
+            </div>
+            <h3 class="text-xl font-bold mb-2">${escapeHtml(post.title)}</h3>
+            <p class="text-gray-700 mb-4">${escapeHtml(post.content)}</p>
+            ${post.tags?.length ? `
+              <div class="flex flex-wrap gap-2 mb-4">
+                ${post.tags.map(tag => `<span class="bg-blue-100 text-blue-600 px-3 py-1 rounded-full text-sm">${escapeHtml(tag)}</span>`).join('')}
+              </div>` : ''}
+            <div class="flex items-center space-x-6 pt-4 border-t">
+              <button onclick="likePost('${post._id}')" id="like-btn-${post._id}" class="flex items-center space-x-2 text-gray-600 hover:text-red-600 transition ${isLiked ? 'text-red-500' : ''}">
+                <span class="text-xl">${isLiked ? '❤️' : '🤍'}</span>
+                <span id="like-count-${post._id}">${post.likes?.length || 0}</span>
+              </button>
+              <button onclick="toggleComments('${post._id}')" class="flex items-center space-x-2 text-gray-600 hover:text-blue-600 transition">
+                <span class="text-xl">💬</span>
+                <span id="comment-count-${post._id}">${post.comments?.length || 0}</span>
+              </button>
+            </div>
+          </div>
+          <div id="comments-${post._id}" class="hidden border-t bg-gray-50 p-4"></div>
+        </div>
+      `;
+    }).join('');
+
+    // Join socket rooms for all posts
+    if (socket && socket.connected) {
+      posts.forEach(post => {
+        socket.emit('join-post', post._id);
+        joinedPosts.add(post._id);
+      });
+    }
+  } catch (error) {
+    console.error('Error loading posts:', error);
+    document.getElementById('posts-container').innerHTML = 
+      '<p class="text-red-500 text-center py-8">Error loading posts. Please refresh the page.</p>';
+  }
+}
+
+// Toggle Comments
 async function toggleComments(postId) {
   const section = document.getElementById(`comments-${postId}`);
+  if (!section) return;
+
   if (section.classList.contains('hidden')) {
     await loadComments(postId);
     section.classList.remove('hidden');
+    // Join room when opening comments
+    if (socket && socket.connected) {
+      socket.emit('join-post', postId);
+      joinedPosts.add(postId);
+    }
   } else {
     section.classList.add('hidden');
   }
 }
 
+// Load Comments
 async function loadComments(postId) {
-  const res = await fetch(`${API_URL}/posts/${postId}/comments`, {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  const comments = await res.json();
-  const section = document.getElementById(`comments-${postId}`);
-  section.innerHTML = `
-    <div class="space-y-3">
-      ${comments.map(c => renderComment(c, postId)).join('')}
-    </div>
-    <form onsubmit="addComment(event, '${postId}')" class="mt-4">
-      <div class="flex space-x-2 items-center">
-        <input type="text" name="comment" maxlength="300" placeholder="Write a comment..."
-          oninput="updateCounter(this, '${postId}')"
-          class="flex-1 border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-600" required>
-        <button class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Post</button>
+  try {
+    const res = await fetch(`${API_URL}/posts/${postId}/comments`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    
+    if (!res.ok) throw new Error('Failed to load comments');
+    
+    const comments = await res.json();
+    const section = document.getElementById(`comments-${postId}`);
+    
+    if (!section) return;
+    
+    section.innerHTML = `
+      <div class="space-y-3 mb-4" id="comments-list-${postId}">
+        ${comments.length > 0 ? comments.map(c => renderComment(c, postId)).join('') : '<p class="text-gray-500 text-sm">No comments yet. Be the first!</p>'}
       </div>
-      <p id="counter-${postId}" class="text-xs text-gray-500 mt-1">0 / 300</p>
-    </form>
-  `;
+      <form onsubmit="addComment(event, '${postId}')" class="mt-4">
+        <div class="flex space-x-2 items-start">
+          <img src="${currentUser.avatar}" class="w-8 h-8 rounded-full">
+          <div class="flex-1">
+            <input type="text" name="comment" maxlength="300" placeholder="Write a comment..."
+              oninput="updateCounter(this, '${postId}')"
+              class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-600" required>
+            <p id="counter-${postId}" class="text-xs text-gray-500 mt-1">0 / 300</p>
+          </div>
+          <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">Post</button>
+        </div>
+      </form>
+    `;
+  } catch (error) {
+    console.error('Error loading comments:', error);
+  }
 }
 
-// ==========================
-// 🔹 Add / Delete Comments
-// ==========================
+// Add Comment
 window.addComment = async (e, postId) => {
   e.preventDefault();
   const input = e.target.comment;
   const text = input.value.trim();
+  
   if (!text) return;
 
-  const res = await fetch(`${API_URL}/posts/${postId}/comments`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-    body: JSON.stringify({ text })
-  });
+  try {
+    const res = await fetch(`${API_URL}/posts/${postId}/comments`, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json', 
+        'Authorization': `Bearer ${token}` 
+      },
+      body: JSON.stringify({ text })
+    });
 
-  const comment = await res.json();
-  if (!comment.error) {
+    if (!res.ok) throw new Error('Failed to add comment');
+
+    const comment = await res.json();
+    
+    // Clear input and reset counter
     input.value = '';
     updateCounter(input, postId);
 
-    // Emit new comment to server for real-time updates
-    socket.emit('new-comment', { postId, comment });
-
-    // Update locally if section visible
-    const section = document.getElementById(`comments-${postId}`);
-    if (section && !section.classList.contains('hidden')) {
-      const list = section.querySelector('.space-y-3');
-      list.insertAdjacentHTML('beforeend', renderComment(comment, postId));
-      updateCommentCount(postId, 1);
-    }
+    // Comment will be added via socket event
+  } catch (error) {
+    console.error('Error adding comment:', error);
+    alert('Failed to add comment. Please try again.');
   }
 };
 
+// Delete Comment
 window.deleteComment = async (postId, commentId) => {
-  const res = await fetch(`${API_URL}/posts/${postId}/comments/${commentId}`, {
-    method: 'DELETE',
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  if (res.ok) {
-    document.getElementById(`comment-${commentId}`)?.remove();
-    updateCommentCount(postId, -1);
+  if (!confirm('Delete this comment?')) return;
+
+  try {
+    const res = await fetch(`${API_URL}/posts/${postId}/comments/${commentId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+
+    if (!res.ok) throw new Error('Failed to delete comment');
+    
+    // Comment will be removed via socket event
+  } catch (error) {
+    console.error('Error deleting comment:', error);
+    alert('Failed to delete comment. Please try again.');
   }
 };
 
-// ==========================
-// 🔹 Like Post
-// ==========================
+// Like Post
 window.likePost = async (postId) => {
-  socket.emit('toggle-like', { postId });
+  try {
+    const res = await fetch(`${API_URL}/posts/${postId}/like`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+
+    if (!res.ok) throw new Error('Failed to like post');
+    
+    // Like will be updated via socket event
+  } catch (error) {
+    console.error('Error liking post:', error);
+  }
 };
 
-// ==========================
-// 🔹 User Search with Debounce
-// ==========================
+// Make toggleComments global
+window.toggleComments = toggleComments;
+
+// User Search with Debounce
 let searchTimeout;
 document.getElementById('user-search').addEventListener('input', (e) => {
   clearTimeout(searchTimeout);
   searchTimeout = setTimeout(async () => {
     const query = e.target.value.trim();
-    if (!query) return document.getElementById('search-results').innerHTML = '';
-    const res = await fetch(`${API_URL}/users/search?q=${query}`, { headers: { 'Authorization': `Bearer ${token}` } });
-    const users = await res.json();
-    document.getElementById('search-results').innerHTML = users.map(u => `
-      <a href="/profile/${u._id}" class="flex items-center space-x-3 p-2 hover:bg-gray-50 rounded-lg">
-        <img src="${u.avatar}" class="w-10 h-10 rounded-full" />
-        <div>
-          <p class="font-semibold text-sm">${u.displayName}</p>
-          <p class="text-xs text-gray-500">@${u.username}</p>
-        </div>
-      </a>
-    `).join('');
+    const resultsDiv = document.getElementById('search-results');
+    
+    if (!query) {
+      resultsDiv.innerHTML = '';
+      return;
+    }
+    
+    try {
+      const res = await fetch(`${API_URL}/users/search?q=${query}`, { 
+        headers: { 'Authorization': `Bearer ${token}` } 
+      });
+      
+      if (!res.ok) throw new Error('Search failed');
+      
+      const users = await res.json();
+      
+      resultsDiv.innerHTML = users.map(u => `
+        <a href="/profile/${u._id}" class="flex items-center space-x-3 p-2 hover:bg-gray-50 rounded-lg transition">
+          <img src="${u.avatar}" class="w-10 h-10 rounded-full" />
+          <div>
+            <p class="font-semibold text-sm">${escapeHtml(u.displayName)}</p>
+            <p class="text-xs text-gray-500">@${escapeHtml(u.username)}</p>
+          </div>
+        </a>
+      `).join('') || '<p class="text-sm text-gray-500">No users found</p>';
+    } catch (error) {
+      console.error('Search error:', error);
+      resultsDiv.innerHTML = '<p class="text-sm text-red-500">Search failed</p>';
+    }
   }, 300);
 });
 
-// ==========================
-// 🔹 Socket.IO Real-time Listeners
-// ==========================
-socket.on('new-comment', ({ postId, comment }) => {
-  const section = document.getElementById(`comments-${postId}`);
-  if (!section) return;
-  const list = section.querySelector('.space-y-3') || (() => {
-    const div = document.createElement('div');
-    div.className = 'space-y-3';
-    section.prepend(div);
-    return div;
-  })();
-  list.insertAdjacentHTML('beforeend', renderComment(comment, postId));
-  updateCommentCount(postId, 1);
-});
-
-socket.on('delete-comment', ({ postId, commentId }) => {
-  document.getElementById(`comment-${commentId}`)?.remove();
-  updateCommentCount(postId, -1);
-});
-
-socket.on('update-likes', ({ postId, likes }) => {
-  const likeEl = document.getElementById(`like-count-${postId}`);
-  if (likeEl) likeEl.textContent = likes.length;
-});
-
-// ==========================
-// 🔹 Modal Controls
-// ==========================
+// Modal Controls
 document.getElementById('create-post-btn').addEventListener('click', () => {
   document.getElementById('create-modal').classList.remove('hidden');
 });
+
 document.getElementById('close-modal').addEventListener('click', () => {
   document.getElementById('create-modal').classList.add('hidden');
 });
 
-// ==========================
-// 🔹 Create Post
-// ==========================
-document.getElementById('post-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const title = document.getElementById('post-title').value.trim();
-  const content = document.getElementById('post-content').value.trim();
-  const tags = document.getElementById('post-tags').value.split(',').map(t => t.trim()).filter(t => t);
-
-  if (!title || !content) return;
-
-  const res = await fetch(`${API_URL}/posts`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-    body: JSON.stringify({ title, content, tags })
-  });
-
-  if (res.ok) {
+// Click outside modal to close
+document.getElementById('create-modal').addEventListener('click', (e) => {
+  if (e.target.id === 'create-modal') {
     document.getElementById('create-modal').classList.add('hidden');
-    document.getElementById('post-form').reset();
-    await loadPosts();
   }
 });
 
-// ==========================
-// 🔹 Init
-// ==========================
+// Create Post
+document.getElementById('post-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  
+  const title = document.getElementById('post-title').value.trim();
+  const content = document.getElementById('post-content').value.trim();
+  const tags = document.getElementById('post-tags').value
+    .split(',')
+    .map(t => t.trim())
+    .filter(t => t);
+
+  if (!title || !content) return;
+
+  try {
+    const res = await fetch(`${API_URL}/posts`, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json', 
+        'Authorization': `Bearer ${token}` 
+      },
+      body: JSON.stringify({ title, content, tags })
+    });
+
+    if (!res.ok) throw new Error('Failed to create post');
+
+    document.getElementById('create-modal').classList.add('hidden');
+    document.getElementById('post-form').reset();
+    await loadPosts();
+  } catch (error) {
+    console.error('Error creating post:', error);
+    alert('Failed to create post. Please try again.');
+  }
+});
+
+// Initialize
 (async () => {
   await loadCurrentUser();
+  initSocket();
   await loadPosts();
 })();
 </script>
