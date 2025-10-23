@@ -38,6 +38,19 @@ app.use(express.json());
 // Serve uploaded images
 app.use('/uploads', express.static('uploads'));
 
+// Serve frontend static build (if present)
+const distPath = path.resolve('dist');
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+  // SPA fallback: serve index.html for non-API GET requests
+  app.get('*', (req, res, next) => {
+    if (req.method !== 'GET' || req.path.startsWith('/api') || req.path.startsWith('/uploads')) return next();
+    res.sendFile(path.join(distPath, 'index.html'), (err) => {
+      if (err) next(err);
+    });
+  });
+}
+
 let db;
 let client;
 

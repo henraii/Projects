@@ -1,10 +1,9 @@
 services:
-  # Backend Service
   - type: web
-    name: socialblog-backend
+    name: socialblog
     env: node
-    buildCommand: npm install
-    startCommand: node server.js  # Updated to match logs
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
     envVars:
       - key: NODE_VERSION
         value: 18
@@ -12,15 +11,3 @@ services:
         sync: false
       - key: JWT_SECRET
         sync: false
-      - key: PORT
-        value: 3001
-
-  # Frontend Service
-  - type: web
-    name: socialblog-frontend
-    env: node
-    buildCommand: npm install && npm run build
-    startCommand: serve -s dist  # Updated for production
-    envVars:
-      - key: NODE_VERSION
-        value: 18

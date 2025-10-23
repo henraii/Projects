@@ -124,7 +124,7 @@ import Layout from '../../layouts/Layout.astro';
 
     // Load profile
     async function loadProfile() {
-      const res = await fetch(`${API_URL}/users/${userId}`, {
+      const res = await fetch(`${API_URL}.api/users/${userId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       profileUser = await res.json();
@@ -226,7 +226,7 @@ import Layout from '../../layouts/Layout.astro';
       }
 
       try {
-        const res = await fetch(`${API_URL}/users/${userId}`, {
+        const res = await fetch(`${API_URL}api//users/${userId}`, {
           method: 'PUT',
           headers: { 'Authorization': `Bearer ${token}` },
           body: formData
