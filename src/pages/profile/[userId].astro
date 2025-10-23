@@ -2,10 +2,6 @@
 // src/pages/profile/[userId].astro
 import Layout from '../../layouts/Layout.astro';
 
-// Provide a minimal getStaticPaths so Astro's static build doesn't error
-// for this dynamic route. Returning an empty array means no profile pages
-// will be statically generated at build time; the page is handled client-side
-// and Express's SPA fallback will serve index.html for profile URLs.
 export async function getStaticPaths() {
   return [];
 }
@@ -17,23 +13,18 @@ export async function getStaticPaths() {
       <div class="h-32"></div>
       <div class="bg-white px-6 pb-6">
         <div class="flex items-end -mt-16 mb-4">
-          <img id="profile-avatar" class="w-32 h-32 rounded-full border-4 border-white shadow-lg cursor-pointer hover:opacity-80 transition" />
+          <img id="profile-avatar" class="w-32 h-32 rounded-full border-4 border-white shadow-lg" />
           <div class="ml-4 flex-1">
             <h1 id="profile-name" class="text-3xl font-bold"></h1>
             <p id="profile-username" class="text-gray-600"></p>
           </div>
           <div class="space-x-3">
-            <!-- Edit Button - Only for owner -->
             <button id="edit-profile-btn" class="hidden bg-yellow-500 text-white px-6 py-2 rounded-lg font-semibold hover:bg-yellow-600 transition">
               Edit Profile
             </button>
-            
-            <!-- Message Button -->
             <button id="message-btn" class="hidden bg-blue-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-blue-700 transition">
               Message
             </button>
-            
-            <!-- Follow/Unfollow Buttons -->
             <button id="follow-btn" class="hidden bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-2 rounded-lg font-semibold hover:from-blue-700 hover:to-purple-700 transition">
               Follow
             </button>
@@ -43,7 +34,6 @@ export async function getStaticPaths() {
           </div>
         </div>
         
-        <!-- Editable Bio -->
         <div id="bio-container">
           <p id="profile-bio" class="text-gray-700 mb-4"></p>
         </div>
@@ -81,20 +71,17 @@ export async function getStaticPaths() {
     <div class="bg-white rounded-lg p-6 w-full max-w-md mx-4">
       <h3 class="text-xl font-bold mb-4">Edit Profile</h3>
       
-      <!-- Avatar Upload -->
       <div class="mb-4">
         <label class="block text-sm font-medium text-gray-700 mb-2">Profile Picture</label>
         <input type="file" id="avatar-input" accept="image/*" class="w-full p-2 border border-gray-300 rounded">
         <img id="avatar-preview" class="mt-2 w-24 h-24 rounded-full object-cover hidden">
       </div>
       
-      <!-- Display Name -->
       <div class="mb-4">
         <label class="block text-sm font-medium text-gray-700 mb-2">Display Name</label>
         <input type="text" id="edit-name" class="w-full p-2 border border-gray-300 rounded">
       </div>
       
-      <!-- Bio -->
       <div class="mb-6">
         <label class="block text-sm font-medium text-gray-700 mb-2">Bio</label>
         <textarea id="edit-bio" rows="3" class="w-full p-2 border border-gray-300 rounded resize-none"></textarea>
@@ -121,7 +108,12 @@ export async function getStaticPaths() {
     let profileUser;
     let isOwner = false;
 
-    // Load current user
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
     async function loadCurrentUser() {
       const res = await fetch(`${API_URL}/api/users/me`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -130,14 +122,12 @@ export async function getStaticPaths() {
       isOwner = currentUser._id === userId;
     }
 
-    // Load profile
     async function loadProfile() {
-      const res = await fetch(`${API_URL}.api/users/${userId}`, {
+      const res = await fetch(`${API_URL}/api/users/${userId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       profileUser = await res.json();
 
-      // Update UI
       document.getElementById('profile-avatar').src = profileUser.avatar;
       document.getElementById('profile-name').textContent = profileUser.displayName;
       document.getElementById('profile-username').textContent = '@' + profileUser.username;
@@ -146,7 +136,6 @@ export async function getStaticPaths() {
       document.getElementById('followers-count').textContent = profileUser.followers?.length || 0;
       document.getElementById('following-count').textContent = profileUser.following?.length || 0;
 
-      // Show appropriate buttons
       if (isOwner) {
         document.getElementById('edit-profile-btn').classList.remove('hidden');
       } else {
@@ -159,21 +148,19 @@ export async function getStaticPaths() {
         }
       }
 
-      // Load posts
       loadPosts();
     }
 
-    // Load posts
     function loadPosts() {
       const postsContainer = document.getElementById('user-posts');
       if (profileUser.posts?.length) {
         postsContainer.innerHTML = profileUser.posts.map(post => `
           <div class="border-b border-gray-200 pb-6">
-            <h3 class="text-xl font-bold mb-2">${post.title}</h3>
-            <p class="text-gray-700 mb-3">${post.content}</p>
+            <h3 class="text-xl font-bold mb-2">${escapeHtml(post.title)}</h3>
+            <p class="text-gray-700 mb-3">${escapeHtml(post.content)}</p>
             ${post.tags?.length ? `
               <div class="flex flex-wrap gap-2 mb-3">
-                ${post.tags.map(tag => `<span class="bg-blue-100 text-blue-600 px-3 py-1 rounded-full text-sm">${tag}</span>`).join('')}
+                ${post.tags.map(tag => `<span class="bg-blue-100 text-blue-600 px-3 py-1 rounded-full text-sm">${escapeHtml(tag)}</span>`).join('')}
               </div>
             ` : ''}
             <div class="flex items-center space-x-6 text-sm text-gray-500">
@@ -188,13 +175,10 @@ export async function getStaticPaths() {
       }
     }
 
-    // Edit Profile Functionality
     document.getElementById('edit-profile-btn').addEventListener('click', () => {
-      // Populate modal with current data
       document.getElementById('edit-name').value = profileUser.displayName;
       document.getElementById('edit-bio').value = profileUser.bio || '';
       
-      // Show avatar preview
       const avatarPreview = document.getElementById('avatar-preview');
       avatarPreview.src = profileUser.avatar;
       avatarPreview.classList.remove('hidden');
@@ -202,50 +186,43 @@ export async function getStaticPaths() {
       document.getElementById('edit-modal').classList.remove('hidden');
     });
 
-    // Cancel edit
     document.getElementById('cancel-edit').addEventListener('click', () => {
       document.getElementById('edit-modal').classList.add('hidden');
     });
 
-    // Avatar upload preview
     document.getElementById('avatar-input').addEventListener('change', (e) => {
       const file = e.target.files[0];
       if (file) {
         const reader = new FileReader();
         reader.onload = (e) => {
           document.getElementById('avatar-preview').src = e.target.result;
+          document.getElementById('avatar-preview').classList.remove('hidden');
         };
         reader.readAsDataURL(file);
       }
     });
 
-    // Save edits
     document.getElementById('save-edit').addEventListener('click', async () => {
       const formData = new FormData();
       
-      // Add text fields
       formData.append('displayName', document.getElementById('edit-name').value);
       formData.append('bio', document.getElementById('edit-bio').value);
       
-      // Add avatar if changed
       const avatarFile = document.getElementById('avatar-input').files[0];
       if (avatarFile) {
         formData.append('avatar', avatarFile);
       }
 
       try {
-        const res = await fetch(`${API_URL}api//users/${userId}`, {
+        const res = await fetch(`${API_URL}/api/users/${userId}`, {
           method: 'PUT',
           headers: { 'Authorization': `Bearer ${token}` },
           body: formData
         });
 
         if (res.ok) {
-          // Close modal and reload profile
           document.getElementById('edit-modal').classList.add('hidden');
-          loadProfile();
-          
-          // Show success message
+          await loadProfile();
           alert('Profile updated successfully!');
         } else {
           alert('Failed to update profile');
@@ -256,9 +233,8 @@ export async function getStaticPaths() {
       }
     });
 
-    // Follow/Unfollow
     document.getElementById('follow-btn').addEventListener('click', async () => {
-      await fetch(`${API_URL}/users/${userId}/follow`, {
+      await fetch(`${API_URL}/api/users/${userId}/follow`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -266,33 +242,23 @@ export async function getStaticPaths() {
     });
 
     document.getElementById('unfollow-btn').addEventListener('click', async () => {
-      await fetch(`${API_URL}/users/${userId}/follow`, {
+      await fetch(`${API_URL}/api/users/${userId}/follow`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
       location.reload();
     });
 
-    // Message button
     document.getElementById('message-btn').addEventListener('click', () => {
       window.location.href = `/chat?user=${userId}`;
     });
 
-    // Click outside modal to close
     document.getElementById('edit-modal').addEventListener('click', (e) => {
       if (e.target.id === 'edit-modal') {
         document.getElementById('edit-modal').classList.add('hidden');
       }
     });
 
-    // Initialize
     loadCurrentUser().then(loadProfile);
   </script>
-
-  <style>
-    /* Ensure modal is properly centered */
-    #edit-modal {
-      z-index: 50;
-    }
-  </style>
 </Layout>

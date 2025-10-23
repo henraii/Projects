@@ -10,61 +10,50 @@ import { MongoClient, ObjectId } from 'mongodb';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const httpServer = createServer(app);
 
-// Fixed: Better CORS configuration for Socket.IO
+const PORT = process.env.PORT || 3001;
+const MONGODB_URI = process.env.MONGODB_URI;
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3001';
+
+// Socket.IO with proper CORS
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.FRONTEND_URL || "https://myblog-v804.onrender.com",
+    origin: FRONTEND_URL,
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true
   }
 });
 
-// Fixed: Single PORT declaration
-const PORT = process.env.PORT || 3001;
-const MONGODB_URI = process.env.MONGODB_URI;
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
-
-// Fixed: Better CORS for Express
+// CORS for Express
 app.use(cors({
-  origin: process.env.FRONTEND_URL || "https://myblog-v804.onrender.com",
+  origin: FRONTEND_URL,
   credentials: true
 }));
+
 app.use(express.json());
 
-// Serve uploaded images
-app.use('/uploads', express.static('uploads'));
-
-// Serve frontend static build (if present)
-const distPath = path.resolve('dist');
-if (fs.existsSync(distPath)) {
-  app.use(express.static(distPath));
-  // SPA fallback: serve index.html for non-API GET requests
-  app.get('*', (req, res, next) => {
-    if (req.method !== 'GET' || req.path.startsWith('/api') || req.path.startsWith('/uploads')) return next();
-    res.sendFile(path.join(distPath, 'index.html'), (err) => {
-      if (err) next(err);
-    });
-  });
-}
-
-let db;
-let client;
-
 // Create uploads folder if it doesn't exist
-if (!fs.existsSync('uploads')) {
-  fs.mkdirSync('uploads');
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
   console.log('📁 Created uploads folder');
 }
 
-// WARNING: Render has ephemeral filesystem - files will be deleted on restart
-// For production, use cloud storage like AWS S3 or Cloudinary
+// Serve uploaded images
+app.use('/uploads', express.static(uploadsDir));
+
+// Multer configuration
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, 'uploads/');
+    cb(null, uploadsDir);
   },
   filename: (req, file, cb) => {
     cb(null, Date.now() + path.extname(file.originalname));
@@ -73,7 +62,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({ 
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith('image/')) {
       cb(null, true);
@@ -82,6 +71,9 @@ const upload = multer({
     }
   }
 });
+
+let db;
+let client;
 
 // Connect to MongoDB
 async function connectDB() {
@@ -97,7 +89,6 @@ async function connectDB() {
     console.log('✅ Connected to MongoDB successfully');
     console.log('📦 Database: HardenGoat');
     
-    // Test the connection
     await db.command({ ping: 1 });
     console.log('🏓 MongoDB ping successful');
   } catch (error) {
@@ -129,7 +120,6 @@ app.post('/api/signup', async (req, res) => {
   try {
     const { email, password, username, displayName } = req.body;
     
-    // Validation
     if (!email || !password || !username || !displayName) {
       return res.status(400).json({ error: 'All fields are required' });
     }
@@ -200,45 +190,6 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// EDIT PROFILE ROUTE
-app.put('/api/users/:userId', authenticateToken, upload.single('avatar'), async (req, res) => {
-  try {
-    // Check if user is editing their own profile
-    if (req.user.userId !== req.params.userId) {
-      return res.status(403).json({ error: 'Unauthorized - You can only edit your own profile' });
-    }
-
-    const { displayName, bio } = req.body;
-    const updateData = { displayName, bio };
-
-    // Add avatar if uploaded
-    if (req.file) {
-      updateData.avatar = `/uploads/${req.file.filename}`;
-      console.log(`🖼️ New avatar uploaded: ${updateData.avatar}`);
-    }
-
-    // Update user in database
-    const result = await db.collection('users').findOneAndUpdate(
-      { _id: new ObjectId(req.params.userId) },
-      { $set: updateData },
-      { returnDocument: 'after' }
-    );
-
-    if (!result.value) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    // Remove password from response
-    const { password, ...userWithoutPassword } = result.value;
-
-    console.log('✅ Profile updated successfully');
-    res.json(userWithoutPassword);
-  } catch (error) {
-    console.error('Update profile error:', error);
-    res.status(500).json({ error: 'Server error during profile update' });
-  }
-});
-
 // USER ROUTES
 app.get('/api/users/me', authenticateToken, async (req, res) => {
   try {
@@ -302,6 +253,40 @@ app.get('/api/users/:userId', authenticateToken, async (req, res) => {
   }
 });
 
+// Line 286 - The findOneAndUpdate fix
+app.put('/api/users/:userId', authenticateToken, upload.single('avatar'), async (req, res) => {
+  try {
+    if (req.user.userId !== req.params.userId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    const { displayName, bio } = req.body;
+    const updateData = { displayName, bio };
+
+    if (req.file) {
+      updateData.avatar = `/uploads/${req.file.filename}`;
+      console.log(`🖼️ New avatar uploaded: ${updateData.avatar}`);
+    }
+
+    // FIXED: MongoDB's findOneAndUpdate returns the document directly, not in a .value property
+    const result = await db.collection('users').findOneAndUpdate(
+      { _id: new ObjectId(req.params.userId) },
+      { $set: updateData },
+      { returnDocument: 'after' }
+    );
+
+    // FIXED: The returned document is in result directly (not result.value in newer MongoDB driver)
+    if (!result) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const { password, ...userWithoutPassword } = result;
+    res.json(userWithoutPassword);
+  } catch (error) {
+    console.error('Update profile error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
 app.post('/api/users/:userId/follow', authenticateToken, async (req, res) => {
   try {
     const currentUserId = req.user.userId;
@@ -359,7 +344,6 @@ app.get('/api/posts', authenticateToken, async (req, res) => {
       .limit(50)
       .toArray();
     
-    // Manually fetch author info for each post
     const postsWithAuthors = await Promise.all(
       posts.map(async (post) => {
         const author = await db.collection('users').findOne(
@@ -387,13 +371,11 @@ app.get('/api/posts/:postId', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Post not found' });
     }
 
-    // Fetch author
     const author = await db.collection('users').findOne(
       { _id: new ObjectId(post.userId) },
       { projection: { password: 0 } }
     );
 
-    // Populate comment authors
     if (post.comments && post.comments.length > 0) {
       const commentUserIds = [...new Set(post.comments.map(c => c.userId))];
       const users = await db.collection('users')
@@ -475,7 +457,6 @@ app.post('/api/posts/:postId/like', authenticateToken, async (req, res) => {
   }
 });
 
-// Get all comments for a post
 app.get('/api/posts/:postId/comments', authenticateToken, async (req, res) => {
   try {
     const post = await db.collection('posts').findOne({ _id: new ObjectId(req.params.postId) });
@@ -503,7 +484,6 @@ app.get('/api/posts/:postId/comments', authenticateToken, async (req, res) => {
   }
 });
 
-// Add a new comment
 app.post('/api/posts/:postId/comments', authenticateToken, async (req, res) => {
   try {
     const { text } = req.body;
@@ -530,8 +510,6 @@ app.post('/api/posts/:postId/comments', authenticateToken, async (req, res) => {
     );
 
     const populatedComment = { ...comment, author: user };
-
-    // Emit only to users in this post's room
     io.to(req.params.postId).emit('new-comment', { postId: req.params.postId, comment: populatedComment });
 
     res.status(201).json(populatedComment);
@@ -541,7 +519,6 @@ app.post('/api/posts/:postId/comments', authenticateToken, async (req, res) => {
   }
 });
 
-// Delete comment (only by author)
 app.delete('/api/posts/:postId/comments/:commentId', authenticateToken, async (req, res) => {
   try {
     const { postId, commentId } = req.params;
@@ -627,7 +604,6 @@ app.get('/api/chats/:chatId/messages', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Chat not found' });
     }
 
-    // Check if user is a participant
     if (!chat.participants.includes(req.user.userId)) {
       return res.status(403).json({ error: 'Access denied' });
     }
@@ -639,7 +615,7 @@ app.get('/api/chats/:chatId/messages', authenticateToken, async (req, res) => {
   }
 });
 
-// SOCKET.IO for real-time features
+// SOCKET.IO
 io.use((socket, next) => {
   const token = socket.handshake.auth.token;
   if (!token) return next(new Error('Authentication error: No token provided'));
@@ -654,19 +630,16 @@ io.use((socket, next) => {
 io.on('connection', (socket) => {
   console.log('✅ User connected:', socket.userId);
 
-  // Join a post room for real-time comments/likes
   socket.on('join-post', (postId) => {
     socket.join(postId);
     console.log(`User ${socket.userId} joined post room ${postId}`);
   });
 
-  // Real-time chat room
   socket.on('join-chat', (chatId) => {
     socket.join(chatId);
     console.log(`User ${socket.userId} joined chat ${chatId}`);
   });
 
-  // Real-time chat message
   socket.on('send-message', async ({ chatId, content }) => {
     if (!chatId || !content) return;
 
@@ -692,59 +665,12 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Real-time post comment
-  socket.on('new-comment', async ({ postId, text }) => {
-    if (!postId || !text) return;
-
-    const comment = {
-      _id: new ObjectId().toString(),
-      userId: socket.userId,
-      text,
-      createdAt: new Date()
-    };
-
-    try {
-      await db.collection('posts').updateOne(
-        { _id: new ObjectId(postId) },
-        { $push: { comments: comment } }
-      );
-
-      io.to(postId).emit('new-comment', { postId, comment });
-    } catch (error) {
-      console.error('Error sending comment:', error);
-    }
-  });
-
-  // Real-time like/unlike
-  socket.on('toggle-like', async ({ postId }) => {
-    if (!postId) return;
-
-    try {
-      const post = await db.collection('posts').findOne({ _id: new ObjectId(postId) });
-      if (!post) return;
-
-      const hasLiked = post.likes.includes(socket.userId);
-
-      await db.collection('posts').updateOne(
-        { _id: new ObjectId(postId) },
-        hasLiked
-          ? { $pull: { likes: socket.userId } }
-          : { $addToSet: { likes: socket.userId } }
-      );
-
-      const updatedPost = await db.collection('posts').findOne({ _id: new ObjectId(postId) });
-      io.to(postId).emit('update-likes', { postId, likes: updatedPost.likes });
-    } catch (error) {
-      console.error('Error toggling like:', error);
-    }
-  });
-
   socket.on('disconnect', () => {
     console.log('❌ User disconnected:', socket.userId);
   });
 });
 
-// Health check endpoint
+// Health check
 app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'ok', 
@@ -753,13 +679,24 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Error handling middleware
+// Serve frontend static build
+const distPath = path.join(__dirname, 'dist');
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+  app.get('*', (req, res, next) => {
+    if (req.method !== 'GET' || req.path.startsWith('/api') || req.path.startsWith('/uploads')) return next();
+    res.sendFile(path.join(distPath, 'index.html'), (err) => {
+      if (err) next(err);
+    });
+  });
+}
+
+// Error handling
 app.use((err, req, res, next) => {
   console.error('Error:', err);
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// Handle 404
 app.use((req, res) => {
   res.status(404).json({ error: 'Endpoint not found' });
 });
@@ -777,7 +714,17 @@ process.on('SIGINT', async () => {
   }
 });
 
-// Start server - FIXED: Removed duplicate PORT declaration
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+  setTimeout(() => process.exit(1), 100);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  setTimeout(() => process.exit(1), 100);
+});
+
+// Start server
 connectDB().then(() => {
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`\n🚀 Server running on http://0.0.0.0:${PORT}`);
@@ -788,16 +735,4 @@ connectDB().then(() => {
 }).catch(error => {
   console.error('Failed to start server:', error);
   process.exit(1);
-});
-
-// Process-level error logging
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err);
-  // give logs a moment then exit
-  setTimeout(() => process.exit(1), 100);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  setTimeout(() => process.exit(1), 100);
 });
