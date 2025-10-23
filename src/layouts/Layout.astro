@@ -1,6 +1,8 @@
 ---
 // src/layouts/Layout.astro
-const { title } = Astro.props;
+// Use exported props instead of the `Astro` global so TypeScript/VSCode
+// recognizes the prop and doesn't report `Cannot find name 'Astro'`.
+export let title = 'SocialBlog';
 ---
 <!DOCTYPE html>
 <html lang="en">

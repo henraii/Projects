@@ -9,6 +9,7 @@
     "dev:backend": "nodemon server.js",
     "dev:frontend": "astro dev",
     "start": "node server.js",
+  "start:detached": "node run-detached.js",
     
     "build": "astro build",
     "preview": "astro preview",
@@ -39,6 +40,8 @@
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
-    "nodemon": "^3.1.10"
+    "nodemon": "^3.1.10",
+    "mongodb-memory-server": "^8.12.1"
   }
+
 }

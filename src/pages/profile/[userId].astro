@@ -1,6 +1,14 @@
 ---
 // src/pages/profile/[userId].astro
 import Layout from '../../layouts/Layout.astro';
+
+// Provide a minimal getStaticPaths so Astro's static build doesn't error
+// for this dynamic route. Returning an empty array means no profile pages
+// will be statically generated at build time; the page is handled client-side
+// and Express's SPA fallback will serve index.html for profile URLs.
+export async function getStaticPaths() {
+  return [];
+}
 ---
 <Layout title="Profile">
   <div class="max-w-5xl mx-auto">

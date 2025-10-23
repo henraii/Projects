@@ -1,0 +1,13 @@
+Connecting to MongoDB...
+✅ Connected to MongoDB successfully
+📦 Database: HardenGoat
+🏓 MongoDB ping successful
+Connecting to MongoDB...
+✅ Connected to MongoDB successfully
+📦 Database: HardenGoat
+🏓 MongoDB ping successful
+
+🚀 Server running on http://0.0.0.0:3001
+📡 API available at http://0.0.0.0:3001/api
+💬 WebSocket server ready for connections
+🖼️ File uploads enabled at http://0.0.0.0:3001/uploads

@@ -789,3 +789,15 @@ connectDB().then(() => {
   console.error('Failed to start server:', error);
   process.exit(1);
 });
+
+// Process-level error logging
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+  // give logs a moment then exit
+  setTimeout(() => process.exit(1), 100);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  setTimeout(() => process.exit(1), 100);
+});
