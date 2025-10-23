@@ -215,7 +215,7 @@ function escapeHtml(text) {
 // Load Current User
 async function loadCurrentUser() {
   try {
-    const res = await fetch(`${API_URL}/users/me`, {
+    const res = await fetch(`${API_URL}/api/users/me`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     if (!res.ok) throw new Error('Failed to load user');
@@ -234,7 +234,7 @@ async function loadCurrentUser() {
 // Load Posts
 async function loadPosts() {
   try {
-    const res = await fetch(`${API_URL}/posts`, { 
+    const res = await fetch(`${API_URL}/api/posts`, {
       headers: { 'Authorization': `Bearer ${token}` } 
     });
     

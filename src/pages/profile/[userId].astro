@@ -101,7 +101,7 @@ import Layout from '../../layouts/Layout.astro';
 
   <script>
     // @ts-nocheck
-    const API_URL = 'http://localhost:3001/api';
+    const API_URL = 'https://myblog-v804.onrender.com/api';
     const token = localStorage.getItem('token');
 
     if (!token) {
@@ -115,7 +115,7 @@ import Layout from '../../layouts/Layout.astro';
 
     // Load current user
     async function loadCurrentUser() {
-      const res = await fetch(`${API_URL}/users/me`, {
+      const res = await fetch(`${API_URL}/api/users/me`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       currentUser = await res.json();

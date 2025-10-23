@@ -133,7 +133,7 @@ const { title } = Astro.props;
     // @ts-nocheck
     const token = localStorage.getItem('token');
     if (token) {
-      fetch('http://localhost:3001/api/users/me', {
+      fetch('https://myblog-v804.onrender.com/api/users/me', {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       .then(res => res.json())

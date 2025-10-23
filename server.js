@@ -13,18 +13,26 @@ import fs from 'fs';
 
 const app = express();
 const httpServer = createServer(app);
+
+// Fixed: Better CORS configuration for Socket.IO
 const io = new Server(httpServer, {
   cors: {
-    origin: "https://myblog-v804.onrender.com",
-    methods: ["GET", "POST", "PUT", "DELETE"]
+    origin: process.env.FRONTEND_URL || "https://myblog-v804.onrender.com",
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    credentials: true
   }
 });
 
+// Fixed: Single PORT declaration
 const PORT = process.env.PORT || 3001;
 const MONGODB_URI = process.env.MONGODB_URI;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
-app.use(cors());
+// Fixed: Better CORS for Express
+app.use(cors({
+  origin: process.env.FRONTEND_URL || "https://myblog-v804.onrender.com",
+  credentials: true
+}));
 app.use(express.json());
 
 // Serve uploaded images
@@ -39,7 +47,8 @@ if (!fs.existsSync('uploads')) {
   console.log('📁 Created uploads folder');
 }
 
-// Multer setup for file uploads
+// WARNING: Render has ephemeral filesystem - files will be deleted on restart
+// For production, use cloud storage like AWS S3 or Cloudinary
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, 'uploads/');
@@ -755,15 +764,14 @@ process.on('SIGINT', async () => {
   }
 });
 
-// Start server
+// Start server - FIXED: Removed duplicate PORT declaration
 connectDB().then(() => {
-  const PORT = process.env.PORT || 3001; // Render sets process.env.PORT
-httpServer.listen(PORT, () => {
-  console.log(`\n🚀 Server running on http://0.0.0.0:${PORT}`); // Use 0.0.0.0 for Render
-  console.log(`📡 API available at http://0.0.0.0:${PORT}/api`);
-  console.log(`💬 WebSocket server ready for connections`);
-  console.log(`🖼️ File uploads enabled at http://0.0.0.0:${PORT}/uploads`);
-});
+  httpServer.listen(PORT, '0.0.0.0', () => {
+    console.log(`\n🚀 Server running on http://0.0.0.0:${PORT}`);
+    console.log(`📡 API available at http://0.0.0.0:${PORT}/api`);
+    console.log(`💬 WebSocket server ready for connections`);
+    console.log(`🖼️ File uploads enabled at http://0.0.0.0:${PORT}/uploads`);
+  });
 }).catch(error => {
   console.error('Failed to start server:', error);
   process.exit(1);

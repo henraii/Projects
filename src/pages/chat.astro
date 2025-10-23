@@ -110,7 +110,7 @@ import Layout from '../layouts/Layout.astro';
     // Load current user
     async function loadCurrentUser() {
       try {
-        const res = await fetch(`${API_URL}/users/me`, {
+        const res = await fetch(`${API_URL}/api/users/me`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         if (!res.ok) throw new Error('Failed to load user');
@@ -130,7 +130,7 @@ import Layout from '../layouts/Layout.astro';
       }
 
       try {
-        const res = await fetch(`${API_URL}/users/${userId}`, {
+        const res = await fetch(`${API_URL}/api/users/${userId}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         if (!res.ok) throw new Error('Failed to load user');
@@ -150,7 +150,7 @@ import Layout from '../layouts/Layout.astro';
     // Load chats
     async function loadChats() {
       try {
-        const res = await fetch(`${API_URL}/chats`, {
+        const res = await fetch(`${API_URL}/api/chats`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         if (!res.ok) throw new Error('Failed to load chats');
@@ -222,7 +222,7 @@ import Layout from '../layouts/Layout.astro';
         }
 
         // Load messages
-        const messagesRes = await fetch(`${API_URL}/chats/${chatId}/messages`, {
+        const messagesRes = await fetch(`${API_URL}/api/chats/${chatId}/messages`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         if (!messagesRes.ok) throw new Error('Failed to load messages');
@@ -291,7 +291,7 @@ import Layout from '../layouts/Layout.astro';
     async function startNewChat() {
       if (recipientId && recipientId !== currentUser._id) {
         try {
-          const res = await fetch(`${API_URL}/chats`, {
+          const res = await fetch(`${API_URL}/api/chats`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
