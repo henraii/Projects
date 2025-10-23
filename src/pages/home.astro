@@ -317,7 +317,7 @@ async function toggleComments(postId) {
 // Load Comments
 async function loadComments(postId) {
   try {
-    const res = await fetch(`${API_URL}/posts/${postId}/comments`, {
+    const res = await fetch(`${API_URL}/api/posts/${postId}/comments`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     
@@ -359,7 +359,7 @@ window.addComment = async (e, postId) => {
   if (!text) return;
 
   try {
-    const res = await fetch(`${API_URL}/posts/${postId}/comments`, {
+    const res = await fetch(`${API_URL}/api/posts/${postId}/comments`, {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json', 
@@ -388,7 +388,7 @@ window.deleteComment = async (postId, commentId) => {
   if (!confirm('Delete this comment?')) return;
 
   try {
-    const res = await fetch(`${API_URL}/posts/${postId}/comments/${commentId}`, {
+    const res = await fetch(`${API_URL}/api/posts/${postId}/comments/${commentId}`, {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${token}` }
     });
@@ -405,7 +405,7 @@ window.deleteComment = async (postId, commentId) => {
 // Like Post
 window.likePost = async (postId) => {
   try {
-    const res = await fetch(`${API_URL}/posts/${postId}/like`, {
+    const res = await fetch(`${API_URL}/api/posts/${postId}/like`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}` }
     });
@@ -435,7 +435,7 @@ document.getElementById('user-search').addEventListener('input', (e) => {
     }
     
     try {
-      const res = await fetch(`${API_URL}/users/search?q=${query}`, { 
+      const res = await fetch(`${API_URL}/api/users/search?q=${query}`, { 
         headers: { 'Authorization': `Bearer ${token}` } 
       });
       
@@ -489,7 +489,7 @@ document.getElementById('post-form').addEventListener('submit', async (e) => {
   if (!title || !content) return;
 
   try {
-    const res = await fetch(`${API_URL}/posts`, {
+    const res = await fetch(`${API_URL}/api/posts`, {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json', 
